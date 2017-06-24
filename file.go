@@ -266,7 +266,7 @@ func (m *memPage) slot(i int) int64 { return m.off + szPage + int64(i)<<uint(m.r
 
 func (m *memPage) split(need int64) (int64, error) {
 	if m.rank <= maxSharedRank {
-		return -1, fmt.Errorf("internal error: %T.split: m.rank %v", m.rank)
+		return -1, fmt.Errorf("internal error: %T.split: m.rank %v", m, m.rank)
 	}
 
 	have := m.size
