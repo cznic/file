@@ -444,15 +444,19 @@ func testAlloc(t *testing.T, f0 File, quota, max int) {
 	defer f.Close()
 
 	var a []int64
-	rng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	pos := rng.Pos()
+	vrng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Allocate
 	for rem := quota; rem > 0; {
-		size := rng.Next()%max + 1
+		size := srng.Next()%max + 1
 		off, err := f.Alloc(int64(size))
 		if err != nil {
 			t.Fatal(err)
@@ -470,7 +474,7 @@ func testAlloc(t *testing.T, f0 File, quota, max int) {
 		p := buffer.Get(size)
 		b := *p
 		for i := range b {
-			b[i] = byte(rng.Next())
+			b[i] = byte(vrng.Next())
 		}
 		if _, err := f0.WriteAt(b, off); err != nil {
 			t.Fatal(err)
@@ -482,10 +486,11 @@ func testAlloc(t *testing.T, f0 File, quota, max int) {
 	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
-	rng.Seek(pos)
+	srng.Seek(0)
+	vrng.Seek(0)
 	// Verify
 	for i, off := range a {
-		size := rng.Next()%max + 1
+		size := srng.Next()%max + 1
 		u, err := f.UsableSize(off)
 		if err != nil {
 			t.Fatal(err)
@@ -502,7 +507,7 @@ func testAlloc(t *testing.T, f0 File, quota, max int) {
 		}
 
 		for j, g := range b {
-			if e := byte(rng.Next()); g != e {
+			if e := byte(vrng.Next()); g != e {
 				t.Fatalf("%v: %#x+%#x: %#02x %#02x", i, off, j, g, e)
 			}
 		}
@@ -510,7 +515,7 @@ func testAlloc(t *testing.T, f0 File, quota, max int) {
 	}
 	// Shuffle
 	for i := range a {
-		j := rng.Next() % len(a)
+		j := srng.Next() % len(a)
 		a[i], a[j] = a[j], a[i]
 	}
 	// Free
@@ -566,15 +571,19 @@ func testAlloc2(t *testing.T, f0 File, quota, max int) {
 	defer f.Close()
 
 	var a []int64
-	rng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	pos := rng.Pos()
+	vrng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Allocate
 	for rem := quota; rem > 0; {
-		size := rng.Next()%max + 1
+		size := srng.Next()%max + 1
 		off, err := f.Alloc(int64(size))
 		if err != nil {
 			t.Fatal(err)
@@ -592,7 +601,7 @@ func testAlloc2(t *testing.T, f0 File, quota, max int) {
 		p := buffer.Get(size)
 		b := *p
 		for i := range b {
-			b[i] = byte(rng.Next())
+			b[i] = byte(vrng.Next())
 		}
 		if _, err := f0.WriteAt(b, off); err != nil {
 			t.Fatal(err)
@@ -604,10 +613,11 @@ func testAlloc2(t *testing.T, f0 File, quota, max int) {
 	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
-	rng.Seek(pos)
+	srng.Seek(0)
+	vrng.Seek(0)
 	// Verify & free
 	for i, off := range a {
-		size := rng.Next()%max + 1
+		size := srng.Next()%max + 1
 		u, err := f.UsableSize(off)
 		if err != nil {
 			t.Fatal(err)
@@ -624,7 +634,7 @@ func testAlloc2(t *testing.T, f0 File, quota, max int) {
 		}
 
 		for i, g := range b {
-			if e := byte(rng.Next()); g != e {
+			if e := byte(vrng.Next()); g != e {
 				t.Fatalf("%#x: %#02x %#02x", i, g, e)
 			}
 		}
@@ -675,7 +685,12 @@ func testAlloc3(t *testing.T, f0 File, quota, max int) {
 
 	defer f.Close()
 
-	rng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vrng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -683,9 +698,9 @@ func testAlloc3(t *testing.T, f0 File, quota, max int) {
 	m := map[int64][]byte{}
 	rem := quota
 	for rem > 0 {
-		switch rng.Next() % 3 {
+		switch srng.Next() % 3 {
 		case 0, 1: // 2/3 allocate
-			size := rng.Next()%max + 1
+			size := srng.Next()%max + 1
 			rem -= size
 			off, err := f.Alloc(int64(size))
 			if err != nil {
@@ -703,7 +718,7 @@ func testAlloc3(t *testing.T, f0 File, quota, max int) {
 
 			b := make([]byte, size)
 			for i := range b {
-				b[i] = byte(rng.Next())
+				b[i] = byte(vrng.Next())
 			}
 			if _, err := f0.WriteAt(b, off); err != nil {
 				t.Fatal(err)
@@ -837,7 +852,12 @@ func testReopen(t *testing.T, quota, max int) {
 		t.Fatal(err)
 	}
 
-	rng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vrng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -845,9 +865,9 @@ func testReopen(t *testing.T, quota, max int) {
 	m := map[int64][]byte{}
 	rem := quota
 	for rem > 0 {
-		switch rng.Next() % 3 {
+		switch srng.Next() % 3 {
 		case 0, 1: // 2/3 allocate
-			size := rng.Next()%max + 1
+			size := srng.Next()%max + 1
 			rem -= size
 			off, err := f.Alloc(int64(size))
 			if err != nil {
@@ -865,7 +885,7 @@ func testReopen(t *testing.T, quota, max int) {
 
 			b := make([]byte, size)
 			for i := range b {
-				b[i] = byte(rng.Next())
+				b[i] = byte(vrng.Next())
 			}
 			if _, err := f0.WriteAt(b, off); err != nil {
 				t.Fatal(err)
@@ -990,7 +1010,12 @@ func testCalloc(t *testing.T, f0 File, quota, max int) {
 
 	defer f.Close()
 
-	rng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vrng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -998,9 +1023,9 @@ func testCalloc(t *testing.T, f0 File, quota, max int) {
 	m := map[int64][]byte{}
 	rem := quota
 	for rem > 0 {
-		switch rng.Next() % 3 {
+		switch srng.Next() % 3 {
 		case 0, 1: // 2/3 allocate
-			size := rng.Next()%max + 1
+			size := srng.Next()%max + 1
 			rem -= size
 			off, err := f.Calloc(int64(size))
 			if err != nil {
@@ -1028,7 +1053,7 @@ func testCalloc(t *testing.T, f0 File, quota, max int) {
 			}
 
 			for i := range b {
-				b[i] = byte(rng.Next())
+				b[i] = byte(vrng.Next())
 			}
 			if _, err := f0.WriteAt(b, off); err != nil {
 				t.Fatal(err)
@@ -1130,7 +1155,12 @@ func testRealloc(t *testing.T, f0 File, quota, max int) {
 
 	defer f.Close()
 
-	rng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vrng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1138,9 +1168,9 @@ func testRealloc(t *testing.T, f0 File, quota, max int) {
 	m := map[int64][]byte{}
 	rem := quota
 	for rem > 0 {
-		switch rng.Next() % 4 {
+		switch srng.Next() % 4 {
 		case 0, 1: // 2/4 allocate
-			size := rng.Next()%max + 1
+			size := srng.Next()%max + 1
 			rem -= size
 			off, err := f.Alloc(int64(size))
 			if err != nil {
@@ -1158,7 +1188,7 @@ func testRealloc(t *testing.T, f0 File, quota, max int) {
 
 			b := make([]byte, size)
 			for i := range b {
-				b[i] = byte(rng.Next())
+				b[i] = byte(vrng.Next())
 			}
 			if _, err := f0.WriteAt(b, off); err != nil {
 				t.Fatal(err)
@@ -1188,7 +1218,7 @@ func testRealloc(t *testing.T, f0 File, quota, max int) {
 
 				buffer.Put(p)
 
-				size := rng.Next()%max + 1
+				size := srng.Next()%max + 1
 				off2, err := f.Realloc(off, int64(size))
 				if err != nil {
 					t.Fatal(err)
@@ -1205,7 +1235,7 @@ func testRealloc(t *testing.T, f0 File, quota, max int) {
 				}
 
 				for i := range b3 {
-					b3[i] = byte(rng.Next())
+					b3[i] = byte(vrng.Next())
 				}
 				if _, err := f0.WriteAt(b3, off2); err != nil {
 					t.Fatal(err)
