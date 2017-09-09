@@ -1534,7 +1534,7 @@ func testWAL(t *testing.T, tmp func(testing.TB) (File, func())) {
 		pageLog  = 16
 		pageSize = 1 << pageLog
 		wsz      = 2 * pageSize
-		N        = 3000
+		N        = 1000
 	)
 
 	f, fn := tmp(t)
@@ -1568,49 +1568,106 @@ func testWAL(t *testing.T, tmp func(testing.TB) (File, func())) {
 	}
 
 	buf := make([]byte, wsz)
-	for i := 0; i < N; i++ {
-		fi, err := wal.Stat()
-		if err != nil {
-			t.Fatal(err)
-		}
+	for j := 0; j < 3; j++ {
+		for i := 0; i < N; i++ {
+			fi, err := wal.Stat()
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		fsz := fi.Size()
-		off := int64(rng.Next() % int(fsz))
-		nw := rng.Next() % wsz
-		for i := range buf[:nw] {
-			buf[i] = byte(rng.Next())
-		}
+			fsz := fi.Size()
+			off := int64(rng.Next() % int(fsz))
+			nw := rng.Next() % wsz
+			for i := range buf[:nw] {
+				buf[i] = byte(rng.Next())
+			}
 
-		if _, err := g.WriteAt(buf[:nw], off); err != nil {
-			t.Fatal(err)
-		}
+			if _, err := g.WriteAt(buf[:nw], off); err != nil {
+				t.Fatal(err)
+			}
 
-		if _, err := wal.WriteAt(buf[:nw], off); err != nil {
-			t.Fatal(err)
-		}
+			if _, err := wal.WriteAt(buf[:nw], off); err != nil {
+				t.Fatal(err)
+			}
 
+			if err := equal(g, wal); err != nil {
+				t.Fatal(err)
+			}
+
+			if i%10 != 0 {
+				continue
+			}
+
+			off = sz/2 + int64(rng.Next())%sz/2
+			if err := g.Truncate(off); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := wal.Truncate(off); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if err := equal(g, wal); err != nil {
 			t.Fatal(err)
 		}
 
-		if i%10 != 0 {
-			continue
-		}
-
-		off = sz/2 + int64(rng.Next())%sz/2
-		if err := g.Truncate(off); err != nil {
+		if err := wal.Commit(); err != nil {
 			t.Fatal(err)
 		}
 
-		if err := wal.Truncate(off); err != nil {
+		if err := equal(f, g); err != nil {
 			t.Fatal(err)
 		}
 	}
+
+	fi, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fsz := fi.Size()
+	off := int64(rng.Next() % int(fsz))
+	nw := rng.Next() % wsz
+	for i := range buf[:nw] {
+		buf[i] = byte(rng.Next())
+	}
+	if _, err := g.WriteAt(buf[:nw], off); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := wal.WriteAt(buf[:nw], off); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := equal(g, wal); err != nil {
 		t.Fatal(err)
 	}
 
+	// corrupt f
+	if err := f.Truncate(off + 2*wsz); err != nil {
+		t.Fatal(err)
+	}
+
+	// corrupt f more.
+	for i := range buf[:nw] {
+		buf[i] = 0
+	}
+	if _, err := f.WriteAt(buf[:nw], off); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := equal(f, wal); err == nil {
+		t.Fatal("unexpected success")
+	}
+
+	crash = true
+	defer func() { crash = false }()
+
 	if err := wal.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	if wal, err = NewWAL(f, w, 0, pageLog); err != nil {
 		t.Fatal(err)
 	}
 

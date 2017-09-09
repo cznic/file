@@ -27,17 +27,18 @@ var (
 	_ io.WriterAt = (*WAL)(nil)
 	_ os.FileInfo = (*fileInfo)(nil)
 
-	tag = []byte("8019cb57a7fd1ab4dacdc44d1a63fc37")
+	crash bool // Test hook: simulate (*WAL).Commit crash.
+	tag   = []byte{0x80, 0x19, 0xcb, 0x57, 0xa7, 0xfd, 0x1a, 0xb4, 0xda, 0xcd, 0xc4, 0x4d, 0x1a, 0x63, 0xfc, 0x37}
 )
 
 type nfo struct {
-	pageSize int64
-	pages    int64
-	size     int64
-	skip     int64
+	PageSize int64
+	Pages    int64
+	Size     int64
+	Skip     int64
 
 	// Keep last
-	tag [16]byte
+	Tag [16]byte
 }
 
 type fileInfo WAL
@@ -113,9 +114,9 @@ func NewWAL(f, w File, skip int64, pageLog int) (*WAL, error) {
 		skip:     skip,
 		sys:      fi.Sys(),
 	}
-	binary.BigEndian.PutUint64(r.nfo[unsafe.Offsetof(nfo{}.pageSize):], uint64(pageSize))
-	binary.BigEndian.PutUint64(r.nfo[unsafe.Offsetof(nfo{}.skip):], uint64(skip))
-	copy(r.nfo[unsafe.Offsetof(nfo{}.tag):], tag)
+	binary.BigEndian.PutUint64(r.nfo[unsafe.Offsetof(nfo{}.PageSize):], uint64(pageSize))
+	binary.BigEndian.PutUint64(r.nfo[unsafe.Offsetof(nfo{}.Skip):], uint64(skip))
+	copy(r.nfo[unsafe.Offsetof(nfo{}.Tag):], tag)
 	if fi, err = w.Stat(); err != nil {
 		return nil, err
 	}
@@ -128,7 +129,7 @@ func NewWAL(f, w File, skip int64, pageLog int) (*WAL, error) {
 	default:
 		var nfo nfo
 		var b [szNfo]byte
-		n, err := w.ReadAt(b[:], skip)
+		n, err := w.ReadAt(b[:], sz-int64(szNfo))
 		if err != nil && err != io.EOF {
 			return nil, fmt.Errorf("NewWAL: %v", err)
 		}
@@ -141,19 +142,19 @@ func NewWAL(f, w File, skip int64, pageLog int) (*WAL, error) {
 			return nil, fmt.Errorf("NewWAL: %v", err)
 		}
 
-		if g, e := nfo.tag[:], tag; !bytes.Equal(g, e) {
+		if g, e := nfo.Tag[:], tag; !bytes.Equal(g, e) {
 			return nil, fmt.Errorf("NewWAL: WAL tag %x, expected %x", g, e)
 		}
 
-		if g, e := nfo.pageSize, int64(pageSize); g != e {
+		if g, e := nfo.PageSize, int64(pageSize); g != e {
 			return nil, fmt.Errorf("NewWAL: WAL page size %#x, expected %v", g, e)
 		}
 
-		if g, e := nfo.skip, skip; g != e {
+		if g, e := nfo.Skip, skip; g != e {
 			return nil, fmt.Errorf("NewWAL: WAL skip %#x, expected %v", g, e)
 		}
 
-		if sz-skip-int64(len(b))%int64(pageSize) != 0 {
+		if (sz-skip-int64(len(b)))%int64(pageSize+szInt64) != 0 {
 			return nil, fmt.Errorf("NewWAL: invalid size of WAL: %#x", sz)
 		}
 
@@ -409,8 +410,8 @@ func (w *WAL) Commit() error {
 			}
 		}
 	}
-	binary.BigEndian.PutUint64(w.nfo[unsafe.Offsetof(nfo{}.pages):], uint64(len(w.m)))
-	binary.BigEndian.PutUint64(w.nfo[unsafe.Offsetof(nfo{}.size):], uint64(w.size))
+	binary.BigEndian.PutUint64(w.nfo[unsafe.Offsetof(nfo{}.Pages):], uint64(len(w.m)))
+	binary.BigEndian.PutUint64(w.nfo[unsafe.Offsetof(nfo{}.Size):], uint64(w.size))
 	h := w.skip + int64(len(w.m))*int64(w.pageSize+szInt64)
 	if _, err := w.W.WriteAt(w.nfo[:], h); err != nil {
 		return fmt.Errorf("%T.Commit: write WAL metadata: %v", w, err)
@@ -418,6 +419,10 @@ func (w *WAL) Commit() error {
 
 	if err := w.W.Sync(); err != nil {
 		return fmt.Errorf("%T.Commit: sync WAL: %v", w, err)
+	}
+
+	if crash {
+		return nil
 	}
 
 	if err := w.F.Truncate(w.size0); err != nil {
