@@ -1,6 +1,6 @@
 # file
 
-Package file implements a mechanism to allocate, resize, and free space within a file-like entity.
+Package file handles write-ahead logs and space management of os.File-like entities.
 
 Installation
 
