@@ -33,8 +33,8 @@ edit:
 
 editor:
 	gofmt -l -s -w *.go
-	go test -i
-	go test -v 2>&1 | tee log
+	go test -run @
+	# go test -v 2>&1 | tee log
 	go build
 
 internalError:

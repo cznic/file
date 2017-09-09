@@ -1499,3 +1499,195 @@ func BenchmarkFreeSmallCache(b *testing.B) { benchmarkFree(b, tmpCache, quota, s
 func BenchmarkFreeBigCache(b *testing.B)   { benchmarkFree(b, tmpCache, quota, big) }
 func BenchmarkFreeSmallFile(b *testing.B)  { benchmarkFree(b, tmpFile, quota, small) }
 func BenchmarkFreeBigFile(b *testing.B)    { benchmarkFree(b, tmpFile, quota, big) }
+
+func equal(f, g File) error {
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+
+	p := buffer.Get(int(fi.Size()))
+	defer buffer.Put(p)
+	b := *p
+	p = buffer.Get(int(fi.Size()))
+	defer buffer.Put(p)
+	b2 := *p
+
+	if n, _ := f.ReadAt(b, 0); n != len(b) {
+		return fmt.Errorf("read returned %v, expected %v", n, len(b))
+	}
+
+	if n, _ := g.ReadAt(b2, 0); n != len(b) {
+		return fmt.Errorf("read returned %v, expected %v", n, len(b2))
+	}
+
+	if !bytes.Equal(b, b2) {
+		return fmt.Errorf("files are different, expected equal")
+	}
+
+	return nil
+}
+
+func testWAL(t *testing.T, tmp func(testing.TB) (File, func())) {
+	const (
+		sz       = 1 << 24
+		pageLog  = 16
+		pageSize = 1 << pageLog
+		wsz      = 2 * pageSize
+		N        = 3000
+	)
+
+	f, fn := tmp(t)
+	defer fn()
+	g, fn := tmp(t)
+	defer fn()
+	w, fn := tmp(t)
+	defer fn()
+
+	fd := make([]byte, sz)
+	rng, err := mathutil.NewFC32(1, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range fd {
+		fd[i] = byte(rng.Next())
+	}
+
+	if _, err := f.WriteAt(fd, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := g.WriteAt(fd, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	wal, err := NewWAL(f, w, 0, pageLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	buf := make([]byte, wsz)
+	for i := 0; i < N; i++ {
+		fi, err := wal.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		fsz := fi.Size()
+		off := int64(rng.Next() % int(fsz))
+		nw := rng.Next() % wsz
+		for i := range buf[:nw] {
+			buf[i] = byte(rng.Next())
+		}
+
+		if _, err := g.WriteAt(buf[:nw], off); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := wal.WriteAt(buf[:nw], off); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := equal(g, wal); err != nil {
+			t.Fatal(err)
+		}
+
+		if i%10 != 0 {
+			continue
+		}
+
+		off = sz/2 + int64(rng.Next())%sz/2
+		if err := g.Truncate(off); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := wal.Truncate(off); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := equal(g, wal); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := wal.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := equal(f, g); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWALMem(t *testing.T)   { testWAL(t, tmpMem) }
+func TestWALCache(t *testing.T) { testWAL(t, tmpCache) }
+func TestWALFile(t *testing.T)  { testWAL(t, tmpFile) }
+
+func benchmarkWALWrite(b *testing.B, tmp func(testing.TB) (File, func()), wsz int) {
+	const (
+		sz      = 1 << 24
+		pageLog = 16
+	)
+
+	f, fn := tmp(b)
+	defer fn()
+	w, fn := tmp(b)
+	defer fn()
+
+	fd := make([]byte, sz)
+	rng, err := mathutil.NewFC32(1, math.MaxInt32, true)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	for i := range fd {
+		fd[i] = byte(rng.Next())
+	}
+
+	if _, err := f.WriteAt(fd, 0); err != nil {
+		b.Fatal(err)
+	}
+
+	wal, err := NewWAL(f, w, 0, pageLog)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	buf := make([]byte, wsz)
+	for i := range buf {
+		buf[i] = byte(rng.Next())
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		off := int64(rng.Next() % sz)
+		if _, err := wal.WriteAt(buf, off); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	b.SetBytes(int64(wsz))
+	if err := wal.Commit(); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkWALWriteMem1(b *testing.B)   { benchmarkWALWrite(b, tmpMem, 1<<0) }
+func BenchmarkWALWriteMem16(b *testing.B)  { benchmarkWALWrite(b, tmpMem, 1<<4) }
+func BenchmarkWALWriteMem256(b *testing.B) { benchmarkWALWrite(b, tmpMem, 1<<8) }
+func BenchmarkWALWriteMem4K(b *testing.B)  { benchmarkWALWrite(b, tmpMem, 1<<12) }
+func BenchmarkWALWriteMem64K(b *testing.B) { benchmarkWALWrite(b, tmpMem, 1<<16) }
+func BenchmarkWALWriteMem1M(b *testing.B)  { benchmarkWALWrite(b, tmpMem, 1<<20) }
+
+func BenchmarkWALWriteCache1(b *testing.B)   { benchmarkWALWrite(b, tmpCache, 1<<0) }
+func BenchmarkWALWriteCache16(b *testing.B)  { benchmarkWALWrite(b, tmpCache, 1<<4) }
+func BenchmarkWALWriteCache256(b *testing.B) { benchmarkWALWrite(b, tmpCache, 1<<8) }
+func BenchmarkWALWriteCache4K(b *testing.B)  { benchmarkWALWrite(b, tmpCache, 1<<12) }
+func BenchmarkWALWriteCache64K(b *testing.B) { benchmarkWALWrite(b, tmpCache, 1<<16) }
+func BenchmarkWALWriteCache1M(b *testing.B)  { benchmarkWALWrite(b, tmpCache, 1<<20) }
+
+func BenchmarkWALWriteFile1(b *testing.B)   { benchmarkWALWrite(b, tmpFile, 1<<0) }
+func BenchmarkWALWriteFile16(b *testing.B)  { benchmarkWALWrite(b, tmpFile, 1<<4) }
+func BenchmarkWALWriteFile256(b *testing.B) { benchmarkWALWrite(b, tmpFile, 1<<8) }
+func BenchmarkWALWriteFile4K(b *testing.B)  { benchmarkWALWrite(b, tmpFile, 1<<12) }
+func BenchmarkWALWriteFile64K(b *testing.B) { benchmarkWALWrite(b, tmpFile, 1<<16) }
+func BenchmarkWALWriteFile1M(b *testing.B)  { benchmarkWALWrite(b, tmpFile, 1<<20) }

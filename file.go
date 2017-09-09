@@ -2,8 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package file implements a mechanism to allocate and deallocate parts of an
-// os.File-like entity.
+// Package file handles write-ahead logs and space management of os.File-like
+// entities.
+//
+// Changelog
+//
+// 2017-09-09: Write ahead log support - initial release.
 package file
 
 import (
@@ -33,19 +37,23 @@ const (
 	oPageRank     = int64(unsafe.Offsetof(page{}.rank))
 	oPageSize     = int64(unsafe.Offsetof(page{}.size))
 	oPageUsed     = int64(unsafe.Offsetof(page{}.used))
-	pageAvail     = pageSize - szPage - szTail
-	pageLog       = 12
+	pageAvail     = pageSize - szPage - szInt64
+	pageBits      = 12
 	pageMask      = pageSize - 1
-	pageSize      = 1 << pageLog
+	pageSize      = 1 << pageBits
 	ranks         = 23
 	slotRanks     = 7
 	szFile        = int64(unsafe.Sizeof(file{}))
+	szInt64       = 8
 	szNode        = int64(unsafe.Sizeof(node{}))
 	szPage        = int64(unsafe.Sizeof(page{}))
-	szTail        = int64(unsafe.Sizeof(int64(0)))
 )
 
-var _ File = (*os.File)(nil)
+var (
+	_ File        = (*os.File)(nil)
+	_ io.ReaderAt = File(nil)
+	_ io.WriterAt = File(nil)
+)
 
 func init() {
 	if szFile%allocAllign != 0 || szFile != 256 || szNode%allocAllign != 0 || szPage%allocAllign != 0 {
@@ -80,7 +88,7 @@ func pageRank(n int64) int {
 		panic(fmt.Errorf("internal error: pageRank(%v)", n))
 	}
 
-	r := int(roundup64(n, pageSize)>>pageLog) + 6
+	r := int(roundup64(n, pageSize)>>pageBits) + 6
 	if r >= ranks {
 		r = ranks - 1
 	}
@@ -256,7 +264,7 @@ func (m *memPage) setTail(n int64) error {
 	p := buffer.Get(8)
 	b := *p
 	write(b, n)
-	_, err := m.f.WriteAt(b, m.off+m.size-szTail)
+	_, err := m.f.WriteAt(b, m.off+m.size-szInt64)
 	buffer.Put(p)
 	return err
 }
@@ -336,11 +344,11 @@ func (m *memPage) unlink() error {
 // File is an os.File-like entity.
 type File interface {
 	Close() error
+	ReadAt(p []byte, off int64) (n int, err error)
 	Stat() (os.FileInfo, error)
 	Sync() error
 	Truncate(int64) error
-	io.ReaderAt
-	io.WriterAt
+	WriteAt(p []byte, off int64) (n int, err error)
 }
 
 type file struct {
@@ -359,6 +367,10 @@ type testStat struct {
 }
 
 // Allocator manages allocation of file blocks within a File.
+//
+// Allocator methods are not safe for concurrent use by multiple goroutines.
+// Callers must provide their own synchronization when it's used concurrently
+// by multiple goroutines.
 type Allocator struct {
 	buf   []byte
 	bufp  *[]byte
@@ -560,7 +572,7 @@ func (a *Allocator) Realloc(off, size int64) (int64, error) {
 		}
 
 		if newRank > maxSharedRank {
-			if need := roundup64(szPage+size+szTail, pageSize); p.size > need {
+			if need := roundup64(szPage+size+szInt64, pageSize); p.size > need {
 				return p.split(need)
 			}
 		}
@@ -603,7 +615,7 @@ func (a *Allocator) UsableSize(off int64) (int64, error) {
 }
 
 func (a *Allocator) allocBig(size int64) (int64, error) {
-	need := roundup64(szPage+size+szTail, pageSize)
+	need := roundup64(szPage+size+szInt64, pageSize)
 	rank := pageRank(need)
 	for i := rank; i < len(a.pages); i++ {
 		off := a.pages[i]
@@ -769,7 +781,7 @@ func (a *Allocator) freeLastPage(p *memPage) error {
 		a.npages--
 		a.bytes -= p.size
 		if p.off > szFile {
-			prevSize, err := a.read(p.off - szTail)
+			prevSize, err := a.read(p.off - szInt64)
 			if err != nil {
 				return err
 			}
@@ -861,7 +873,7 @@ func (a *Allocator) newMemPage(off int64) *memPage { return &memPage{Allocator: 
 
 func (a *Allocator) newPage(size int64) (*memPage, error) {
 	off := roundup64(a.fsize-szFile, pageSize) + szFile
-	size = roundup64(szPage+size+szTail, pageSize)
+	size = roundup64(szPage+size+szInt64, pageSize)
 	p := a.newMemPage(off)
 	p.setRank(int64(pageRank(size)))
 	p.setSize(size)
@@ -1011,5 +1023,5 @@ func (a *Allocator) usableSize(off int64) (int64, *memPage, error) {
 		return int64(1 << uint(p.rank+4)), p, nil
 	}
 
-	return p.size - szPage - szTail, p, nil
+	return p.size - szPage - szInt64, p, nil
 }
