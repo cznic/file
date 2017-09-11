@@ -75,10 +75,7 @@ func (f *fileInfo) Sys() interface{}   { return f.sys }
 //	...
 //
 //	// in another goroutine (write isolation not considered in this example)
-//	mu.Lock()
 //	n, err := db.WriteAt(buf, off)
-//	...
-//	mu.Unlock()
 //	...
 //
 //	// and eventually somewhere
