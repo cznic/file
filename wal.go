@@ -54,9 +54,95 @@ func (f *fileInfo) Sys() interface{}   { return f.sys }
 // 'read-commited' reads.  Call ReadAt of the WAL itself to perform 'read
 // uncommitted' reads.
 //
-// WAL methods are not safe for concurrent use by multiple goroutines.  Callers
-// must provide their own synchronization when it's used concurrently by
-// multiple goroutines.
+// Concurrency
+//
+// ReadAt (read uncommitted) is safe for concurrent use by multiple goroutines
+// so multiple readers are fine, but multiple readers and a single writer is
+// not. However, F.ReadAt (read committed) is safe to run concurrently with any
+// WAL method except Commit. In a typical DB isolation scenario the setup is
+// something like
+//
+//	var db *file.WAL
+//	var mu sync.RWMutex		// The mutex associated with db.
+//
+//	// in another goroutine
+//	mu.RLock()			// read isolated, concurrently with other readers
+//	n, err := db.F.ReadAt(buf, off) // note the F
+//	...
+//	// reads are isolated only until the next RUnlock.
+//	mu.RUnlock()
+//	// db.Commit and mutating of F is now possible.
+//	...
+//
+//	// in another goroutine (write isolation not considered in this example)
+//	mu.Lock()
+//	n, err := db.WriteAt(buf, off)
+//	...
+//	mu.Unlock()
+//	...
+//
+//	// and eventually somewhere
+//	mu.Lock()
+//	err := db.Commit()
+//	...
+//	mu.Unlock()
+//	...
+//
+// No other WAL method is safe for concurrent use by multiple goroutines or
+// concurrently with ReadAt.  Callers must provide their own synchronization
+// when used concurrently by multiple goroutines.
+//
+// Logical page
+//
+// The WAL is divided in logical pages. Every page is 1<<pageLog bytes, pageLog
+// being the argument of NewWAL.
+//
+// Journal page
+//
+// Journal page holds the uncommited logical page of F. Journal page is
+// prefixed with a big-endian encoded int64 offset into F. If the offset is
+// negative then the journal page is considered to be all zeros regardless of
+// its actual content.
+//
+// Journal allocating and size
+//
+// One journal page is appended to W on first write to any logical page. Total
+// size of W is thus skip (argument of NewWAL) + N * (1<<pageLog + 8), where N
+// is the number of write-touched logical pages. Commit adds a small amount of
+// metadata at the end of W. The size and content of the metadata are not part
+// of the API. However, future changes, if any, of the metadata size/content
+// will continue to support journal files written by the previous versions.
+//
+// Additionally, one map[int64]int64 item is used for every allocated journal
+// page.
+//
+// Crash before Commit
+//
+// If the process writing to WAL crashes before commit, W is invalid and it's
+// not possible to continue the interrupted operation as it is not known at
+// what point the crash occurred.  NewWAL will reject invalid WAL file and will
+// not delete it.
+//
+// Crash during a Commit
+//
+// If the WAL metadata has not yet been written and the W file has not yet been
+// synced then the situation is the same as crashing before commit.
+//
+// Once Commit writes the metadata to W and W was synced, the transaction is
+// secured and journal replay starts.
+//
+// Journal replay
+//
+// Journal replay transfers all write-touched pages from W to F. Journal replay
+// starts when Commit completes writing W metadata and syncing W. When the
+// transfer is successfully completed, F is synced, W is emptied and synced, in
+// that order.
+//
+// Crash during journal replay
+//
+// If journal replay has started but not completed due to a crash then W is
+// valid and non empty. If NewWAL is passed a valid, non empty W in its w
+// argument, NewWAL restarts journal replay.
 type WAL struct {
 	F        File // The f argument of NewWAL for convenience. R/O
 	W        File // The w argument of NewWAL for convenience. R/O
@@ -82,8 +168,8 @@ type WAL struct {
 // Passing pageLog less than 1 will panic.  The f and w arguments must not
 // represent the same entity.
 //
-// If w contains a valid write-ahead log, it's first committed to f and
-// emptied. If w contains an invalid or unreadable write ahead log, the
+// If w contains a valid, non empty write-ahead log, it's first committed to f
+// and emptied. If w contains an invalid or unreadable write ahead log, the
 // function returns an error.
 func NewWAL(f, w File, skip int64, pageLog int) (*WAL, error) {
 	if pageLog < 1 {

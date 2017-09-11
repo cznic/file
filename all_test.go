@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math"
 	"os"
@@ -1748,3 +1749,99 @@ func BenchmarkWALWriteFile256(b *testing.B) { benchmarkWALWrite(b, tmpFile, 1<<8
 func BenchmarkWALWriteFile4K(b *testing.B)  { benchmarkWALWrite(b, tmpFile, 1<<12) }
 func BenchmarkWALWriteFile64K(b *testing.B) { benchmarkWALWrite(b, tmpFile, 1<<16) }
 func BenchmarkWALWriteFile1M(b *testing.B)  { benchmarkWALWrite(b, tmpFile, 1<<20) }
+
+func ExampleWAL() {
+	const pageLog = 1
+
+	dir, err := ioutil.TempDir("", "file-example-")
+	if err != nil {
+		panic(err)
+	}
+
+	defer os.RemoveAll(dir)
+
+	f, err := os.Create(filepath.Join(dir, "f"))
+	if err != nil {
+		panic(err)
+	}
+
+	w, err := os.Create(filepath.Join(dir, "w"))
+	if err != nil {
+		panic(err)
+	}
+
+	db, err := NewWAL(f, w, 0, pageLog)
+	if err != nil {
+		panic(err)
+	}
+
+	write := func(b []byte, off int64) {
+		if _, err := db.WriteAt(b, off); err != nil {
+			panic(err)
+		}
+
+		fi, err := w.Stat()
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Printf("---- db.WriteAt(%#v, %v)\n", b, off)
+		fmt.Printf("journal pages %v\n", len(db.m))
+		fmt.Printf("journal size %v\n", fi.Size())
+	}
+
+	read := func() {
+		b := make([]byte, 1024)
+		n, err := f.ReadAt(b, 0)
+		if n == 0 && err != io.EOF {
+			panic(err.Error())
+		}
+
+		fmt.Printf("Read   committed: |% x|\n", b[:n])
+		if n, err = db.ReadAt(b, 0); n == 0 && err != io.EOF {
+			panic(err.Error())
+		}
+
+		fmt.Printf("Read uncommitted: |% x|\n", b[:n])
+	}
+
+	commit := func() {
+		if err := db.Commit(); err != nil {
+			panic(err)
+		}
+
+		fmt.Printf("---- Commit()\n")
+		fmt.Printf("journal pages %v\n", len(db.m))
+		read()
+	}
+
+	fmt.Printf("logical page size  %v\n", 1<<pageLog)
+	fmt.Printf("journal page size %v\n", 1<<pageLog+8)
+	write([]byte{1, 2, 3}, 0)
+	read()
+	commit()
+	write([]byte{0xff}, 1)
+	read()
+	commit()
+	// Output:
+	// logical page size  2
+	// journal page size 10
+	// ---- db.WriteAt([]byte{0x1, 0x2, 0x3}, 0)
+	// journal pages 2
+	// journal size 20
+	// Read   committed: ||
+	// Read uncommitted: |01 02 03|
+	// ---- Commit()
+	// journal pages 0
+	// Read   committed: |01 02 03|
+	// Read uncommitted: |01 02 03|
+	// ---- db.WriteAt([]byte{0xff}, 1)
+	// journal pages 1
+	// journal size 10
+	// Read   committed: |01 02 03|
+	// Read uncommitted: |01 ff 03|
+	// ---- Commit()
+	// journal pages 0
+	// Read   committed: |01 ff 03|
+	// Read uncommitted: |01 ff 03|
+}
