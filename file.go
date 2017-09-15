@@ -17,6 +17,7 @@ import (
 	"unsafe"
 
 	"github.com/cznic/internal/buffer"
+	ifile "github.com/cznic/internal/file"
 	"github.com/cznic/mathutil"
 )
 
@@ -342,6 +343,8 @@ func (m *memPage) unlink() error {
 }
 
 // File is an os.File-like entity.
+//
+// Note: *os.File implements File.
 type File interface {
 	Close() error
 	ReadAt(p []byte, off int64) (n int, err error)
@@ -1025,3 +1028,12 @@ func (a *Allocator) usableSize(off int64) (int64, *memPage, error) {
 
 	return p.size - szPage - szInt64, p, nil
 }
+
+// Mem returns a volatile File backed only by process memory or an error, if
+// any. The Close method of the result must be eventually called to avoid
+// resource leaks.
+func Mem(name string) (File, error) { return ifile.OpenMem(name) }
+
+// Map returns a File backed by memory mapping f or an error, if any. The Close
+// method of the result must be eventually called to avoid resource leaks.
+func Map(f *os.File) (File, error) { return ifile.Open(f) }

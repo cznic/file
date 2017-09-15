@@ -74,7 +74,7 @@ func (f *fileInfo) Sys() interface{}   { return f.sys }
 //	// db.Commit and mutating of F is now possible.
 //	...
 //
-//	// in another goroutine (write isolation not considered in this example)
+//	// in another goroutine (writers serialization not considered in this example)
 //	n, err := db.WriteAt(buf, off)
 //	...
 //
@@ -96,7 +96,7 @@ func (f *fileInfo) Sys() interface{}   { return f.sys }
 //
 // Journal page
 //
-// Journal page holds the uncommited logical page of F. Journal page is
+// Journal page holds the uncommitted logical page of F. Journal page is
 // prefixed with a big-endian encoded int64 offset into F. If the offset is
 // negative then the journal page is considered to be all zeros regardless of
 // its actual content.
@@ -106,8 +106,8 @@ func (f *fileInfo) Sys() interface{}   { return f.sys }
 // One journal page is appended to W on first write to any logical page. Total
 // size of W is thus skip (argument of NewWAL) + N * (1<<pageLog + 8), where N
 // is the number of write-touched logical pages. Commit adds a small amount of
-// metadata at the end of W. The size and content of the metadata are not part
-// of the API. However, future changes, if any, of the metadata size/content
+// metadata at the end of W. The size and content of the meta data are not part
+// of the API. However, future changes, if any, of the meta data size/content
 // will continue to support journal files written by the previous versions.
 //
 // Additionally, one map[int64]int64 item is used for every allocated journal
