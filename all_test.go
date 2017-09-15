@@ -375,12 +375,12 @@ func testPageAlloc2(t *testing.T, tmp func(testing.TB) (File, func()), max int) 
 	testPageAlloc(t, f, *oK*quota, max)
 }
 
-func TestPageAllocSmallMem(t *testing.T)   { testPageAlloc2(t, tmpMem, small) }
-func TestPageAllocBigMem(t *testing.T)     { testPageAlloc2(t, tmpMem, big) }
-func TestPageAllocSmallCache(t *testing.T) { testPageAlloc2(t, tmpMap, small) }
-func TestPageAllocBigCache(t *testing.T)   { testPageAlloc2(t, tmpMap, big) }
-func TestPageAllocSmallFile(t *testing.T)  { testPageAlloc2(t, tmpFile, small) }
-func TestPageAllocBigFile(t *testing.T)    { testPageAlloc2(t, tmpFile, big) }
+func TestPageAllocSmallMem(t *testing.T)  { testPageAlloc2(t, tmpMem, small) }
+func TestPageAllocBigMem(t *testing.T)    { testPageAlloc2(t, tmpMem, big) }
+func TestPageAllocSmallMap(t *testing.T)  { testPageAlloc2(t, tmpMap, small) }
+func TestPageAllocBigMap(t *testing.T)    { testPageAlloc2(t, tmpMap, big) }
+func TestPageAllocSmallFile(t *testing.T) { testPageAlloc2(t, tmpFile, small) }
+func TestPageAllocBigFile(t *testing.T)   { testPageAlloc2(t, tmpFile, big) }
 
 func benchmarkPageAlloc(b *testing.B, tmp func(testing.TB) (File, func()), quota, size int) {
 	b.StopTimer()
@@ -428,9 +428,9 @@ func benchmarkPageAlloc(b *testing.B, tmp func(testing.TB) (File, func()), quota
 	b.SetBytes(int64(quota))
 }
 
-func BenchmarkPageAllocMem(b *testing.B)   { benchmarkPageAlloc(b, tmpMem, quota, small) }
-func BenchmarkPageAllocCache(b *testing.B) { benchmarkPageAlloc(b, tmpMap, quota, small) }
-func BenchmarkPageAllocFile(b *testing.B)  { benchmarkPageAlloc(b, tmpFile, quota, small) }
+func BenchmarkPageAllocMem(b *testing.B)  { benchmarkPageAlloc(b, tmpMem, quota, small) }
+func BenchmarkPageAllocMap(b *testing.B)  { benchmarkPageAlloc(b, tmpMap, quota, small) }
+func BenchmarkPageAllocFile(b *testing.B) { benchmarkPageAlloc(b, tmpFile, quota, small) }
 
 func testAlloc(t *testing.T, f0 File, quota, max int) {
 	f, err := NewAllocator(f0)
@@ -552,12 +552,12 @@ func testAllocB(t *testing.T, tmp func(testing.TB) (File, func()), quota, max in
 	testAlloc(t, f, quota, max)
 }
 
-func TestAllocSmallMem(t *testing.T)   { testAllocB(t, tmpMem, *oK*quota, small) }
-func TestAllocBigMem(t *testing.T)     { testAllocB(t, tmpMem, *oK*quota, big) }
-func TestAllocSmallCache(t *testing.T) { testAllocB(t, tmpMap, *oK*quota, small) }
-func TestAllocBigCache(t *testing.T)   { testAllocB(t, tmpMap, *oK*quota, big) }
-func TestAllocSmallFile(t *testing.T)  { testAllocB(t, tmpFile, *oK*quota, small) }
-func TestAllocBigFile(t *testing.T)    { testAllocB(t, tmpFile, *oK*quota, big) }
+func TestAllocSmallMem(t *testing.T)  { testAllocB(t, tmpMem, *oK*quota, small) }
+func TestAllocBigMem(t *testing.T)    { testAllocB(t, tmpMem, *oK*quota, big) }
+func TestAllocSmallMap(t *testing.T)  { testAllocB(t, tmpMap, *oK*quota, small) }
+func TestAllocBigMap(t *testing.T)    { testAllocB(t, tmpMap, *oK*quota, big) }
+func TestAllocSmallFile(t *testing.T) { testAllocB(t, tmpFile, *oK*quota, small) }
+func TestAllocBigFile(t *testing.T)   { testAllocB(t, tmpFile, *oK*quota, big) }
 
 func testAlloc2(t *testing.T, f0 File, quota, max int) {
 	f, err := NewAllocator(f0)
@@ -667,12 +667,12 @@ func testAlloc2B(t *testing.T, tmp func(testing.TB) (File, func()), quota, max i
 	testAlloc2(t, f, quota, max)
 }
 
-func TestAlloc2SmallMem(t *testing.T)   { testAlloc2B(t, tmpMem, *oK*quota, small) }
-func TestAlloc2BigMem(t *testing.T)     { testAlloc2B(t, tmpMem, *oK*quota, big) }
-func TestAlloc2SmallCache(t *testing.T) { testAlloc2B(t, tmpMap, *oK*quota, small) }
-func TestAlloc2BigCache(t *testing.T)   { testAlloc2B(t, tmpMap, *oK*quota, big) }
-func TestAlloc2SmallFile(t *testing.T)  { testAlloc2B(t, tmpFile, *oK*quota, small) }
-func TestAlloc2BigFile(t *testing.T)    { testAlloc2B(t, tmpFile, *oK*quota, big) }
+func TestAlloc2SmallMem(t *testing.T)  { testAlloc2B(t, tmpMem, *oK*quota, small) }
+func TestAlloc2BigMem(t *testing.T)    { testAlloc2B(t, tmpMem, *oK*quota, big) }
+func TestAlloc2SmallMap(t *testing.T)  { testAlloc2B(t, tmpMap, *oK*quota, small) }
+func TestAlloc2BigMap(t *testing.T)    { testAlloc2B(t, tmpMap, *oK*quota, big) }
+func TestAlloc2SmallFile(t *testing.T) { testAlloc2B(t, tmpFile, *oK*quota, small) }
+func TestAlloc2BigFile(t *testing.T)   { testAlloc2B(t, tmpFile, *oK*quota, big) }
 
 func testAlloc3(t *testing.T, f0 File, quota, max int) {
 	f, err := NewAllocator(f0)
@@ -818,12 +818,12 @@ func testAlloc3B(t *testing.T, tmp func(testing.TB) (File, func()), quota, max i
 	testAlloc3(t, f, quota, max)
 }
 
-func TestAlloc3SmallMem(t *testing.T)   { testAlloc3B(t, tmpMem, *oK*quota, small) }
-func TestAlloc3BigMem(t *testing.T)     { testAlloc3B(t, tmpMem, *oK*quota, big) }
-func TestAlloc3SmallCache(t *testing.T) { testAlloc3B(t, tmpMap, *oK*quota, small) }
-func TestAlloc3BigCache(t *testing.T)   { testAlloc3B(t, tmpMap, *oK*quota, big) }
-func TestAlloc3SmallFile(t *testing.T)  { testAlloc3B(t, tmpFile, *oK*quota, small) }
-func TestAlloc3BigFile(t *testing.T)    { testAlloc3B(t, tmpFile, *oK*quota, big) }
+func TestAlloc3SmallMem(t *testing.T)  { testAlloc3B(t, tmpMem, *oK*quota, small) }
+func TestAlloc3BigMem(t *testing.T)    { testAlloc3B(t, tmpMem, *oK*quota, big) }
+func TestAlloc3SmallMap(t *testing.T)  { testAlloc3B(t, tmpMap, *oK*quota, small) }
+func TestAlloc3BigMap(t *testing.T)    { testAlloc3B(t, tmpMap, *oK*quota, big) }
+func TestAlloc3SmallFile(t *testing.T) { testAlloc3B(t, tmpFile, *oK*quota, small) }
+func TestAlloc3BigFile(t *testing.T)   { testAlloc3B(t, tmpFile, *oK*quota, big) }
 
 func testReopen(t *testing.T, quota, max int) {
 	dir, err := ioutil.TempDir("", "file-test-")
@@ -1137,12 +1137,12 @@ func testCalloc2(t *testing.T, tmp func(testing.TB) (File, func()), quota, max i
 	testCalloc(t, f, quota, max)
 }
 
-func TestCallocSmallMem(t *testing.T)   { testCalloc2(t, tmpMem, *oK*quota, small) }
-func TestCallocBigMem(t *testing.T)     { testCalloc2(t, tmpMem, *oK*quota, big) }
-func TestCallocSmallCache(t *testing.T) { testCalloc2(t, tmpMap, *oK*quota, small) }
-func TestCallocBigCache(t *testing.T)   { testCalloc2(t, tmpMap, *oK*quota, big) }
-func TestCallocSmallFile(t *testing.T)  { testCalloc2(t, tmpFile, *oK*quota, small) }
-func TestCallocBigFile(t *testing.T)    { testCalloc2(t, tmpFile, *oK*quota, big) }
+func TestCallocSmallMem(t *testing.T)  { testCalloc2(t, tmpMem, *oK*quota, small) }
+func TestCallocBigMem(t *testing.T)    { testCalloc2(t, tmpMem, *oK*quota, big) }
+func TestCallocSmallMap(t *testing.T)  { testCalloc2(t, tmpMap, *oK*quota, small) }
+func TestCallocBigMap(t *testing.T)    { testCalloc2(t, tmpMap, *oK*quota, big) }
+func TestCallocSmallFile(t *testing.T) { testCalloc2(t, tmpFile, *oK*quota, small) }
+func TestCallocBigFile(t *testing.T)   { testCalloc2(t, tmpFile, *oK*quota, big) }
 
 func testRealloc(t *testing.T, f0 File, quota, max int) {
 	f, err := NewAllocator(f0)
@@ -1338,12 +1338,12 @@ func testReallocB(t *testing.T, tmp func(testing.TB) (File, func()), quota, max 
 	testRealloc(t, f, quota, max)
 }
 
-func TestReallocSmallMem(t *testing.T)   { testReallocB(t, tmpMem, *oK*quota, small) }
-func TestReallocBigMem(t *testing.T)     { testReallocB(t, tmpMem, *oK*quota, big) }
-func TestReallocSmallCache(t *testing.T) { testReallocB(t, tmpMap, *oK*quota, small) }
-func TestReallocBigCache(t *testing.T)   { testReallocB(t, tmpMap, *oK*quota, big) }
-func TestReallocSmallFile(t *testing.T)  { testReallocB(t, tmpFile, *oK*quota, small) }
-func TestReallocBigFile(t *testing.T)    { testReallocB(t, tmpFile, *oK*quota, big) }
+func TestReallocSmallMem(t *testing.T)  { testReallocB(t, tmpMem, *oK*quota, small) }
+func TestReallocBigMem(t *testing.T)    { testReallocB(t, tmpMem, *oK*quota, big) }
+func TestReallocSmallMap(t *testing.T)  { testReallocB(t, tmpMap, *oK*quota, small) }
+func TestReallocBigMap(t *testing.T)    { testReallocB(t, tmpMap, *oK*quota, big) }
+func TestReallocSmallFile(t *testing.T) { testReallocB(t, tmpFile, *oK*quota, small) }
+func TestReallocBigFile(t *testing.T)   { testReallocB(t, tmpFile, *oK*quota, big) }
 
 func benchmarkAlloc(b *testing.B, tmp func(testing.TB) (File, func()), quota, max int) {
 	b.SetBytes(int64(quota))
@@ -1385,12 +1385,12 @@ func benchmarkAlloc(b *testing.B, tmp func(testing.TB) (File, func()), quota, ma
 	}
 }
 
-func BenchmarkAllocSmallMem(b *testing.B)   { benchmarkAlloc(b, tmpMem, quota, small) }
-func BenchmarkAllocBigMem(b *testing.B)     { benchmarkAlloc(b, tmpMem, quota, big) }
-func BenchmarkAllocSmallCache(b *testing.B) { benchmarkAlloc(b, tmpMap, quota, small) }
-func BenchmarkAllocBigCache(b *testing.B)   { benchmarkAlloc(b, tmpMap, quota, big) }
-func BenchmarkAllocSmallFile(b *testing.B)  { benchmarkAlloc(b, tmpFile, quota, small) }
-func BenchmarkAllocBigFile(b *testing.B)    { benchmarkAlloc(b, tmpFile, quota, big) }
+func BenchmarkAllocSmallMem(b *testing.B)  { benchmarkAlloc(b, tmpMem, quota, small) }
+func BenchmarkAllocBigMem(b *testing.B)    { benchmarkAlloc(b, tmpMem, quota, big) }
+func BenchmarkAllocSmallMap(b *testing.B)  { benchmarkAlloc(b, tmpMap, quota, small) }
+func BenchmarkAllocBigMap(b *testing.B)    { benchmarkAlloc(b, tmpMap, quota, big) }
+func BenchmarkAllocSmallFile(b *testing.B) { benchmarkAlloc(b, tmpFile, quota, small) }
+func BenchmarkAllocBigFile(b *testing.B)   { benchmarkAlloc(b, tmpFile, quota, big) }
 
 func benchmarkCalloc(b *testing.B, tmp func(testing.TB) (File, func()), quota, max int) {
 	b.SetBytes(int64(quota))
@@ -1432,12 +1432,12 @@ func benchmarkCalloc(b *testing.B, tmp func(testing.TB) (File, func()), quota, m
 	}
 }
 
-func BenchmarkCallocSmallMem(b *testing.B)   { benchmarkCalloc(b, tmpMem, quota, small) }
-func BenchmarkCallocBigMem(b *testing.B)     { benchmarkCalloc(b, tmpMem, quota, big) }
-func BenchmarkCallocSmallCache(b *testing.B) { benchmarkCalloc(b, tmpMap, quota, small) }
-func BenchmarkCallocBigCache(b *testing.B)   { benchmarkCalloc(b, tmpMap, quota, big) }
-func BenchmarkCallocSmallFile(b *testing.B)  { benchmarkCalloc(b, tmpFile, quota, small) }
-func BenchmarkCallocBigFile(b *testing.B)    { benchmarkCalloc(b, tmpFile, quota, big) }
+func BenchmarkCallocSmallMem(b *testing.B)  { benchmarkCalloc(b, tmpMem, quota, small) }
+func BenchmarkCallocBigMem(b *testing.B)    { benchmarkCalloc(b, tmpMem, quota, big) }
+func BenchmarkCallocSmallMap(b *testing.B)  { benchmarkCalloc(b, tmpMap, quota, small) }
+func BenchmarkCallocBigMap(b *testing.B)    { benchmarkCalloc(b, tmpMap, quota, big) }
+func BenchmarkCallocSmallFile(b *testing.B) { benchmarkCalloc(b, tmpFile, quota, small) }
+func BenchmarkCallocBigFile(b *testing.B)   { benchmarkCalloc(b, tmpFile, quota, big) }
 
 func benchmarkFree(b *testing.B, tmp func(testing.TB) (File, func()), quota, max int) {
 	b.SetBytes(int64(quota))
@@ -1490,12 +1490,12 @@ func benchmarkFree(b *testing.B, tmp func(testing.TB) (File, func()), quota, max
 	}
 }
 
-func BenchmarkFreeSmallMem(b *testing.B)   { benchmarkFree(b, tmpMem, quota, small) }
-func BenchmarkFreeBigMem(b *testing.B)     { benchmarkFree(b, tmpMem, quota, big) }
-func BenchmarkFreeSmallCache(b *testing.B) { benchmarkFree(b, tmpMap, quota, small) }
-func BenchmarkFreeBigCache(b *testing.B)   { benchmarkFree(b, tmpMap, quota, big) }
-func BenchmarkFreeSmallFile(b *testing.B)  { benchmarkFree(b, tmpFile, quota, small) }
-func BenchmarkFreeBigFile(b *testing.B)    { benchmarkFree(b, tmpFile, quota, big) }
+func BenchmarkFreeSmallMem(b *testing.B)  { benchmarkFree(b, tmpMem, quota, small) }
+func BenchmarkFreeBigMem(b *testing.B)    { benchmarkFree(b, tmpMem, quota, big) }
+func BenchmarkFreeSmallMap(b *testing.B)  { benchmarkFree(b, tmpMap, quota, small) }
+func BenchmarkFreeBigMap(b *testing.B)    { benchmarkFree(b, tmpMap, quota, big) }
+func BenchmarkFreeSmallFile(b *testing.B) { benchmarkFree(b, tmpFile, quota, small) }
+func BenchmarkFreeBigFile(b *testing.B)   { benchmarkFree(b, tmpFile, quota, big) }
 
 func equal(f, g File) error {
 	fi, err := f.Stat()
@@ -1673,9 +1673,9 @@ func testWAL(t *testing.T, tmp func(testing.TB) (File, func())) {
 	}
 }
 
-func TestWALMem(t *testing.T)   { testWAL(t, tmpMem) }
-func TestWALCache(t *testing.T) { testWAL(t, tmpMap) }
-func TestWALFile(t *testing.T)  { testWAL(t, tmpFile) }
+func TestWALMem(t *testing.T)  { testWAL(t, tmpMem) }
+func TestWALMap(t *testing.T)  { testWAL(t, tmpMap) }
+func TestWALFile(t *testing.T) { testWAL(t, tmpFile) }
 
 func benchmarkWALWrite(b *testing.B, tmp func(testing.TB) (File, func()), wsz int) {
 	const (
@@ -1732,12 +1732,12 @@ func BenchmarkWALWriteMem4K(b *testing.B)  { benchmarkWALWrite(b, tmpMem, 1<<12)
 func BenchmarkWALWriteMem64K(b *testing.B) { benchmarkWALWrite(b, tmpMem, 1<<16) }
 func BenchmarkWALWriteMem1M(b *testing.B)  { benchmarkWALWrite(b, tmpMem, 1<<20) }
 
-func BenchmarkWALWriteCache1(b *testing.B)   { benchmarkWALWrite(b, tmpMap, 1<<0) }
-func BenchmarkWALWriteCache16(b *testing.B)  { benchmarkWALWrite(b, tmpMap, 1<<4) }
-func BenchmarkWALWriteCache256(b *testing.B) { benchmarkWALWrite(b, tmpMap, 1<<8) }
-func BenchmarkWALWriteCache4K(b *testing.B)  { benchmarkWALWrite(b, tmpMap, 1<<12) }
-func BenchmarkWALWriteCache64K(b *testing.B) { benchmarkWALWrite(b, tmpMap, 1<<16) }
-func BenchmarkWALWriteCache1M(b *testing.B)  { benchmarkWALWrite(b, tmpMap, 1<<20) }
+func BenchmarkWALWriteMap1(b *testing.B)   { benchmarkWALWrite(b, tmpMap, 1<<0) }
+func BenchmarkWALWriteMap16(b *testing.B)  { benchmarkWALWrite(b, tmpMap, 1<<4) }
+func BenchmarkWALWriteMap256(b *testing.B) { benchmarkWALWrite(b, tmpMap, 1<<8) }
+func BenchmarkWALWriteMap4K(b *testing.B)  { benchmarkWALWrite(b, tmpMap, 1<<12) }
+func BenchmarkWALWriteMap64K(b *testing.B) { benchmarkWALWrite(b, tmpMap, 1<<16) }
+func BenchmarkWALWriteMap1M(b *testing.B)  { benchmarkWALWrite(b, tmpMap, 1<<20) }
 
 func BenchmarkWALWriteFile1(b *testing.B)   { benchmarkWALWrite(b, tmpFile, 1<<0) }
 func BenchmarkWALWriteFile16(b *testing.B)  { benchmarkWALWrite(b, tmpFile, 1<<4) }

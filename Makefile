@@ -45,7 +45,7 @@ later:
 	@grep -n $(grep) MAYBE * || true
 
 mem: clean
-	go test -run @ -bench . -memprofile mem.out -memprofilerate 1 -timeout 24h
+	go test -run @ -bench -benchtime 4s -memprofile mem.out -memprofilerate 1 -timeout 24h
 	go tool pprof -lines -web -alloc_space *.test mem.out
 
 nuke: clean
