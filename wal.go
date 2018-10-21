@@ -573,3 +573,19 @@ func (w *WAL) commit(h int64) error {
 	w.size0 = w.size
 	return nil
 }
+
+// Rolback empties the WAL journal without transferring it to F.
+func (w *WAL) Rollback() error {
+	if err := w.W.Truncate(w.skip); err != nil {
+		return err
+	}
+
+	if err := w.W.Sync(); err != nil {
+		return err
+	}
+
+	for k := range w.m {
+		delete(w.m, k)
+	}
+	return nil
+}
