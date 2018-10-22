@@ -50,37 +50,37 @@ func (f *fileInfo) Name() string       { return f.name }
 func (f *fileInfo) Size() int64        { return f.size }
 func (f *fileInfo) Sys() interface{}   { return f.sys }
 
-// WAL implements a write ahead log of F using W. Call F.ReadAt to perform
-// 'read-commited' reads.  Call ReadAt of the WAL itself to perform 'read
-// uncommitted' reads.
+// WAL implements a write ahead log of F using W. Call wal.F.ReadAt to perform
+// 'read-commited' reads.  Call wal.ReadAt to perform 'read uncommitted' reads.
+// Call wal.W.ReadAt to read the write ahead log itself.
 //
 // Concurrency
 //
-// ReadAt (read uncommitted) is safe for concurrent use by multiple goroutines
-// so multiple readers are fine, but multiple readers and a single writer is
-// not. However, F.ReadAt (read committed) is safe to run concurrently with any
-// WAL method except Commit. In a typical DB isolation scenario the setup is
-// something like
+// wal.ReadAt (read uncommitted) is safe for concurrent use by multiple
+// goroutines so multiple readers are fine, but multiple readers and a single
+// writer is not. However, wal.F.ReadAt (read committed) is safe to run
+// concurrently with any WAL method except Commit. In a typical DB isolation
+// scenario the setup is something like
 //
-//	var db *file.WAL
-//	var mu sync.RWMutex		// The mutex associated with db.
+//	var wal *file.WAL
+//	var mu sync.RWMutex		// The mutex associated with wal.
 //
 //	// in another goroutine
 //	mu.RLock()			// read isolated, concurrently with other readers
-//	n, err := db.F.ReadAt(buf, off) // note the F
+//	n, err := wal.F.ReadAt(buf, off) // note the F
 //	...
 //	// reads are isolated only until the next RUnlock.
 //	mu.RUnlock()
-//	// db.Commit and mutating of F is now possible.
+//	// wal.Commit and mutating of F is now possible.
 //	...
 //
 //	// in another goroutine (writers serialization not considered in this example)
-//	n, err := db.WriteAt(buf, off)
+//	n, err := wal.WriteAt(buf, off)
 //	...
 //
 //	// and eventually somewhere
 //	mu.Lock()
-//	err := db.Commit()
+//	err := wal.Commit()
 //	...
 //	mu.Unlock()
 //	...

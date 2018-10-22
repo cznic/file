@@ -244,12 +244,6 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 
 	defer f.Close()
 
-	defer func() {
-		if err := f.Verify(nil); err != nil {
-			t.Error(err)
-		}
-	}()
-
 	rng, err := mathutil.NewFC32(1, max, false)
 	if err != nil {
 		t.Fatal(err)
@@ -276,6 +270,10 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 		a = append(a, p.off)
 		rem -= size
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	for i := len(a) - 1; i >= 0; i-- {
 		p, err := f.openPage(a[i])
@@ -291,42 +289,7 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 		t.Fatal(err)
 	}
 
-	if f.allocs != 0 || f.bytes != 0 || f.npages != 0 || f.fsize != szFile || f.slots != [slotRanks]int64{} || f.pages != [ranks]int64{} {
-		t.Fatalf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v, slots %v, pages %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize, f.slots, f.pages)
-	}
-
-	a = a[:0]
-	for rem := quota; rem > 0; {
-		size := rng.Next()
-		switch {
-		case size > maxSlot:
-			if p, err = f.newPage(int64(size)); err != nil {
-				t.Fatal(err)
-			}
-		default:
-			if p, err = f.newSharedPage(slotRank(size)); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := p.flush(); err != nil {
-			t.Fatal(err)
-		}
-
-		a = append(a, p.off)
-		rem -= size
-	}
-	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
-	for _, off := range a {
-		p, err := f.openPage(off)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if err := f.freePage(p); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := f.flush(); err != nil {
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -354,6 +317,57 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 		a = append(a, p.off)
 		rem -= size
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
+	for _, off := range a {
+		p, err := f.openPage(off)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := f.freePage(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if f.allocs != 0 || f.bytes != 0 || f.npages != 0 || f.fsize != szFile || f.slots != [slotRanks]int64{} || f.pages != [ranks]int64{} {
+		t.Fatalf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v, slots %v, pages %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize, f.slots, f.pages)
+	}
+
+	a = a[:0]
+	for rem := quota; rem > 0; {
+		size := rng.Next()
+		switch {
+		case size > maxSlot:
+			if p, err = f.newPage(int64(size)); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			if p, err = f.newSharedPage(slotRank(size)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := p.flush(); err != nil {
+			t.Fatal(err)
+		}
+
+		a = append(a, p.off)
+		rem -= size
+	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	for i := range a {
 		j := rng.Next() % len(a)
@@ -370,6 +384,10 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 		}
 	}
 	if err := f.flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -452,12 +470,6 @@ func testAlloc(t *testing.T, f0 File, quota, max int) {
 
 	defer f.Close()
 
-	defer func() {
-		if err := f.Verify(nil); err != nil {
-			t.Error(err)
-		}
-	}()
-
 	var a []int64
 	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
@@ -498,6 +510,9 @@ func testAlloc(t *testing.T, f0 File, quota, max int) {
 		buffer.Put(p)
 		a = append(a, off)
 		rem -= size
+	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
 	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
@@ -556,6 +571,10 @@ func testAlloc(t *testing.T, f0 File, quota, max int) {
 		t.Fatal(err)
 	}
 
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
+
 	if f.allocs != 0 || f.bytes != 0 || f.npages != 0 || f.fsize != szFile || f.slots != [slotRanks]int64{} || f.pages != [ranks]int64{} {
 		t.Fatalf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v, slots %v, pages %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize, f.slots, f.pages)
 	}
@@ -584,12 +603,6 @@ func testAlloc2(t *testing.T, f0 File, quota, max int) {
 	}
 
 	defer f.Close()
-
-	defer func() {
-		if err := f.Verify(nil); err != nil {
-			t.Error(err)
-		}
-	}()
 
 	var a []int64
 	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
@@ -631,6 +644,9 @@ func testAlloc2(t *testing.T, f0 File, quota, max int) {
 		buffer.Put(p)
 		a = append(a, off)
 		rem -= size
+	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
 	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
@@ -677,6 +693,10 @@ func testAlloc2(t *testing.T, f0 File, quota, max int) {
 		t.Fatal(err)
 	}
 
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
+
 	if f.allocs != 0 || f.bytes != 0 || f.npages != 0 || f.fsize != szFile || f.slots != [slotRanks]int64{} || f.pages != [ranks]int64{} {
 		t.Fatalf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v, slots %v, pages %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize, f.slots, f.pages)
 	}
@@ -705,12 +725,6 @@ func testAlloc3(t *testing.T, f0 File, quota, max int) {
 	}
 
 	defer f.Close()
-
-	defer func() {
-		if err := f.Verify(nil); err != nil {
-			t.Error(err)
-		}
-	}()
 
 	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
@@ -792,6 +806,9 @@ func testAlloc3(t *testing.T, f0 File, quota, max int) {
 			}
 		}
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	// Verify & free
@@ -831,6 +848,10 @@ func testAlloc3(t *testing.T, f0 File, quota, max int) {
 	}
 
 	if err := f.flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -959,6 +980,9 @@ func testReopen(t *testing.T, quota, max int) {
 			}
 		}
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	ts := f.testStat
@@ -979,12 +1003,6 @@ func testReopen(t *testing.T, quota, max int) {
 	}
 
 	defer f.Close()
-
-	defer func() {
-		if err := f.Verify(nil); err != nil {
-			t.Error(err)
-		}
-	}()
 
 	f.testStat = ts
 	// Verify & free
@@ -1027,6 +1045,10 @@ func testReopen(t *testing.T, quota, max int) {
 		t.Fatal(err)
 	}
 
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
+
 	if f.allocs != 0 || f.bytes != 0 || f.npages != 0 || f.fsize != szFile || f.slots != [slotRanks]int64{} || f.pages != [ranks]int64{} {
 		t.Fatalf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v, slots %v, pages %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize, f.slots, f.pages)
 	}
@@ -1042,12 +1064,6 @@ func testCalloc(t *testing.T, f0 File, quota, max int) {
 	}
 
 	defer f.Close()
-
-	defer func() {
-		if err := f.Verify(nil); err != nil {
-			t.Error(err)
-		}
-	}()
 
 	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
@@ -1131,6 +1147,9 @@ func testCalloc(t *testing.T, f0 File, quota, max int) {
 			}
 		}
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	// Verify & free
@@ -1165,6 +1184,10 @@ func testCalloc(t *testing.T, f0 File, quota, max int) {
 		t.Fatal(err)
 	}
 
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
+
 	if f.allocs != 0 || f.bytes != 0 || f.npages != 0 || f.fsize != szFile || f.slots != [slotRanks]int64{} || f.pages != [ranks]int64{} {
 		t.Fatalf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v, slots %v, pages %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize, f.slots, f.pages)
 	}
@@ -1193,12 +1216,6 @@ func testRealloc(t *testing.T, f0 File, quota, max int) {
 	}
 
 	defer f.Close()
-
-	defer func() {
-		if err := f.Verify(nil); err != nil {
-			t.Error(err)
-		}
-	}()
 
 	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
@@ -1330,6 +1347,9 @@ func testRealloc(t *testing.T, f0 File, quota, max int) {
 			}
 		}
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	// Verify & free
@@ -1369,6 +1389,10 @@ func testRealloc(t *testing.T, f0 File, quota, max int) {
 	}
 
 	if err := f.flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
