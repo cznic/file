@@ -574,7 +574,7 @@ func (w *WAL) commit(h int64) error {
 	return nil
 }
 
-// Rolback empties the WAL journal without transferring it to F.
+// Rollback empties the WAL journal without transferring it to F.
 func (w *WAL) Rollback() error {
 	if err := w.W.Truncate(w.skip); err != nil {
 		return err

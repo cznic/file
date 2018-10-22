@@ -225,6 +225,12 @@ func TestCap(t *testing.T) {
 
 	defer f.Close()
 
+	defer func() {
+		if err := f.Verify(nil); err != nil {
+			t.Error(err)
+		}
+	}()
+
 	if g, e := f.cap, [...]int{252, 126, 63, 31, 15, 7, 3}; g != e {
 		t.Fatal(g, e)
 	}
@@ -237,6 +243,12 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 	}
 
 	defer f.Close()
+
+	defer func() {
+		if err := f.Verify(nil); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	rng, err := mathutil.NewFC32(1, max, false)
 	if err != nil {
@@ -440,6 +452,12 @@ func testAlloc(t *testing.T, f0 File, quota, max int) {
 
 	defer f.Close()
 
+	defer func() {
+		if err := f.Verify(nil); err != nil {
+			t.Error(err)
+		}
+	}()
+
 	var a []int64
 	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
@@ -567,6 +585,12 @@ func testAlloc2(t *testing.T, f0 File, quota, max int) {
 
 	defer f.Close()
 
+	defer func() {
+		if err := f.Verify(nil); err != nil {
+			t.Error(err)
+		}
+	}()
+
 	var a []int64
 	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
@@ -681,6 +705,12 @@ func testAlloc3(t *testing.T, f0 File, quota, max int) {
 	}
 
 	defer f.Close()
+
+	defer func() {
+		if err := f.Verify(nil); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
@@ -950,6 +980,12 @@ func testReopen(t *testing.T, quota, max int) {
 
 	defer f.Close()
 
+	defer func() {
+		if err := f.Verify(nil); err != nil {
+			t.Error(err)
+		}
+	}()
+
 	f.testStat = ts
 	// Verify & free
 	for off, b := range m {
@@ -1006,6 +1042,12 @@ func testCalloc(t *testing.T, f0 File, quota, max int) {
 	}
 
 	defer f.Close()
+
+	defer func() {
+		if err := f.Verify(nil); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
@@ -1151,6 +1193,12 @@ func testRealloc(t *testing.T, f0 File, quota, max int) {
 	}
 
 	defer f.Close()
+
+	defer func() {
+		if err := f.Verify(nil); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {

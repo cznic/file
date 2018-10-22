@@ -34,7 +34,6 @@ edit:
 editor:
 	gofmt -l -s -w *.go
 	go test -run @
-	# go test -v 2>&1 | tee log
 	go build
 
 internalError:
@@ -50,6 +49,9 @@ mem: clean
 
 nuke: clean
 	go clean -i
+
+test:
+	go test -timeout 24h -v 2>&1 | tee log
 
 todo:
 	@grep -nr $(grep) ^[[:space:]]*_[[:space:]]*=[[:space:]][[:alpha:]][[:alnum:]]* * | grep -v $(ngrep) || true

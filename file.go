@@ -96,6 +96,7 @@ func pageRank(n int64) int {
 	return r
 }
 
+// Get an int64 from b. len(b) must be >= 8.
 func read(b []byte) int64 {
 	var n int64
 	for _, v := range b[:8] {
@@ -130,6 +131,7 @@ func slotRank(n int) int {
 	return log(roundup(n, allocAllign)) - 4
 }
 
+// Put an int64 in b. len(b) must be >= 8.
 func write(b []byte, n int64) {
 	b = b[:8]
 	for i := range b {
@@ -138,17 +140,20 @@ func write(b []byte, n int64) {
 	}
 }
 
+// node is a double linked list item in File.
 type node struct {
 	prev, next int64
 }
 
+// memNode is the memory representation of a loaded node.
 type memNode struct {
 	*Allocator
 	dirty bool
 	node
-	off int64
+	off int64 // Offset of the node in File.
 }
 
+// flush stores/persists m if dirty.
 func (m *memNode) flush() error {
 	if !m.dirty {
 		return nil
@@ -164,11 +169,16 @@ func (m *memNode) flush() error {
 	return err
 }
 
+// setNext sets m's next link.
 func (m *memNode) setNext(n int64) { m.next = n; m.dirty = true }
+
+// setPrev sets m's prev link.
 func (m *memNode) setPrev(n int64) { m.prev = n; m.dirty = true }
 
+// unlink removes m from the list it belongs to.
 func (m *memNode) unlink(rank int) error {
 	if m.prev != 0 {
+		// Turn m.prev -> m -> m.next into m.prev -> m.next
 		prev, err := m.openNode(m.prev)
 		if err != nil {
 			return err
@@ -181,6 +191,7 @@ func (m *memNode) unlink(rank int) error {
 	}
 
 	if m.next != 0 {
+		// Turn m.prev <- m <- m.next into m.prev <- m.next
 		next, err := m.openNode(m.next)
 		if err != nil {
 			return err
@@ -192,13 +203,14 @@ func (m *memNode) unlink(rank int) error {
 		}
 	}
 
-	if m.slots[rank] == m.off {
+	if m.slots[rank] == m.off { // m was the head of a slot list
 		m.setSlot(rank, m.next)
 	}
 
 	return nil
 }
 
+// page is a page header in File.
 type page struct {
 	brk int64
 	node
@@ -207,6 +219,7 @@ type page struct {
 	used int64
 }
 
+// memPage is the memory representation of a loaded page.
 type memPage struct {
 	*Allocator
 	dirty bool
@@ -214,6 +227,7 @@ type memPage struct {
 	page
 }
 
+// flush stores/persists m if dirty.
 func (m *memPage) flush() error {
 	if !m.dirty {
 		return nil
@@ -354,6 +368,15 @@ type File interface {
 	WriteAt(p []byte, off int64) (n int, err error)
 }
 
+// Mem returns a volatile File backed only by process memory or an error, if
+// any. The Close method of the result must be eventually called to avoid
+// resource leaks.
+func Mem(name string) (File, error) { return ifile.OpenMem(name) }
+
+// Map returns a File backed by memory mapping f or an error, if any. The Close
+// method of the result must be eventually called to avoid resource leaks.
+func Map(f *os.File) (File, error) { return ifile.Open(f) }
+
 type file struct {
 	_ [16]byte // User area. Magic file number etc.
 
@@ -408,6 +431,7 @@ func NewAllocator(f File) (*Allocator, error) {
 		if _, err := f.WriteAt(a.buf, oFileSkip); err != nil {
 			return nil, err
 		}
+		a.fsize = oFileSkip + int64(len(a.buf))
 	default:
 		if n, err := f.ReadAt(a.buf, oFileSkip); n != len(a.buf) {
 			return nil, err
@@ -897,6 +921,7 @@ func (a *Allocator) newSharedPage(rank int) (*memPage, error) {
 	return p, p.setTail(0)
 }
 
+// openNode returns a memNode from a node at File offset off.
 func (a *Allocator) openNode(off int64) (*memNode, error) {
 	p := buffer.Get(int(szNode))
 	b := *p
@@ -1029,11 +1054,77 @@ func (a *Allocator) usableSize(off int64) (int64, *memPage, error) {
 	return p.size - szPage - szInt64, p, nil
 }
 
-// Mem returns a volatile File backed only by process memory or an error, if
-// any. The Close method of the result must be eventually called to avoid
-// resource leaks.
-func Mem(name string) (File, error) { return ifile.OpenMem(name) }
+type bitmap struct {
+	m File
+}
 
-// Map returns a File backed by memory mapping f or an error, if any. The Close
-// method of the result must be eventually called to avoid resource leaks.
-func Map(f *os.File) (File, error) { return ifile.Open(f) }
+func newBitmap() (*bitmap, error) {
+	m, err := Mem("bitmap")
+	if err != nil {
+		return nil, fmt.Errorf("mmap: %v", err)
+	}
+
+	return &bitmap{m: m}, nil
+}
+
+// VerifyOptions optionally provide more information from Verify.
+type VerifyOptions struct {
+}
+
+// Verify audits the correctness of a and its backing File.
+func (a *Allocator) Verify(opt *VerifyOptions) error {
+	if err := a.flush(); err != nil {
+		return fmt.Errorf("cannot flush: %v", err)
+	}
+
+	fi, err := a.f.Stat()
+	if err != nil {
+		return fmt.Errorf("cannot stat backing file: %v", err)
+	}
+
+	if g, e := fi.Size(), a.fsize; g != e {
+		return fmt.Errorf("invalid file size, got %v, expected %v", g, e)
+	}
+
+	// a := &Allocator{
+	// 	bufp:  buffer.CGet(int(szFile - oFileSkip)),
+	// 	f:     f,
+	// 	fsize: fi.Size(),
+	// }
+	// a.buf = *a.bufp
+	// for i := range a.cap {
+	// 	a.cap[i] = int(pageAvail) / (1 << uint(i+4))
+	// }
+
+	// switch {
+	// case a.fsize <= oFileSkip:
+	// 	if _, err := f.WriteAt(a.buf, oFileSkip); err != nil {
+	// 		return nil, err
+	// 	}
+	// default:
+	// 	if n, err := f.ReadAt(a.buf, oFileSkip); n != len(a.buf) {
+	// 		return nil, err
+	// 	}
+
+	// 	max := a.fsize - szPage
+	// 	for i := range a.pages {
+	// 		if a.pages[i], err = a.check(read(a.buf[int(oFilePages-oFileSkip)+8*i:]), 0, max); err != nil {
+	// 			return nil, err
+	// 		}
+	// 	}
+	// 	for i := range a.slots {
+	// 		if a.slots[i], err = a.check(read(a.buf[int(oFileSlots-oFileSkip)+8*i:]), 0, max); err != nil {
+	// 			return nil, err
+	// 		}
+	// 	}
+	// }
+	// return a, nil
+	// bits, err := newBitmap()
+	// if err != nil {
+	// 	return fmt.Errorf("cannot create bitmap: %v", err)
+	// }
+
+	// use(bits)
+	// panic("TODO")
+	return nil
+}
