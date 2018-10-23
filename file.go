@@ -429,49 +429,63 @@ type Allocator struct {
 // NewAllocator returns a newly created Allocator managing f or an eror, if
 // any. Allocator never touches the first 16 bytes within f.
 func NewAllocator(f File) (*Allocator, error) {
-	fi, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-
 	a := &Allocator{
 		autoflush: true,
 		bufp:      buffer.CGet(int(szFile - oFileSkip)),
-		f:         f,
-		fsize:     fi.Size(),
 	}
 	a.buf = *a.bufp
 	for i := range a.cap {
 		a.cap[i] = int(pageAvail) / (1 << uint(i+4))
 	}
+	if err := a.SetFile(f); err != nil {
+		return nil, err
+	}
 
+	return a, nil
+}
+
+// SetFile sets the allocator's backing File.
+func (a *Allocator) SetFile(f File) error {
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+
+	fsize := fi.Size()
 	switch {
-	case a.fsize <= oFileSkip:
-		if _, err := f.WriteAt(a.buf, oFileSkip); err != nil {
-			return nil, err
+	case fsize <= oFileSkip:
+		for i := range a.buf {
+			a.buf[i] = 0
 		}
-		a.fsize = oFileSkip + int64(len(a.buf))
+		a.file = file{}
+		if _, err := f.WriteAt(a.buf, oFileSkip); err != nil {
+			return err
+		}
+
+		fsize = oFileSkip + int64(len(a.buf))
 	default:
 		if n, err := f.ReadAt(a.buf, oFileSkip); n != len(a.buf) {
 			if err == nil {
 				err = fmt.Errorf("short read")
 			}
-			return nil, err
+			return err
 		}
 
-		max := a.fsize - szPage
+		max := fsize - szPage
 		for i := range a.pages {
 			if a.pages[i], err = a.check(read(a.buf[int(oFilePages-oFileSkip)+8*i:]), 0, max); err != nil {
-				return nil, err
+				return err
 			}
 		}
 		for i := range a.slots {
 			if a.slots[i], err = a.check(read(a.buf[int(oFileSlots-oFileSkip)+8*i:]), 0, max); err != nil {
-				return nil, err
+				return err
 			}
 		}
 	}
-	return a, nil
+	a.f = f
+	a.fsize = fsize
+	return nil
 }
 
 // SetAutoFlush turns on/off automatic flushing of allocator's metadata. When
@@ -1256,7 +1270,7 @@ func (a *Allocator) Verify(opt *VerifyOptions) error {
 			return fmt.Errorf("cannot read tail of page %#x: %v", off, err)
 		}
 
-		if tailSize != 0 { // page in use
+		if tailSize == 0 { // page in use
 			usedPages++
 			switch {
 			case p.rank <= maxSharedRank:
@@ -1273,10 +1287,6 @@ func (a *Allocator) Verify(opt *VerifyOptions) error {
 	}
 	if len(pm) != 0 {
 		return fmt.Errorf("invalid pages lists heads: %#x", pm)
-	}
-
-	if g, e := npages, a.npages; g != e && e != 0 {
-		return fmt.Errorf("invalid number of file pages, got %v, expected %v", g, e)
 	}
 
 	if g, e := off, a.fsize; g != e {
