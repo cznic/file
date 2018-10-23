@@ -1346,7 +1346,7 @@ func (a *Allocator) Verify(opt *VerifyOptions) error {
 
 	if opt != nil {
 		opt.Allocs = allocs
-		opt.Pages = a.npages
+		opt.Pages = npages
 		opt.UsedPages = usedPages
 	}
 	return nil
