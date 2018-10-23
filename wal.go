@@ -50,37 +50,37 @@ func (f *fileInfo) Name() string       { return f.name }
 func (f *fileInfo) Size() int64        { return f.size }
 func (f *fileInfo) Sys() interface{}   { return f.sys }
 
-// WAL implements a write ahead log of F using W. Call F.ReadAt to perform
-// 'read-commited' reads.  Call ReadAt of the WAL itself to perform 'read
-// uncommitted' reads.
+// WAL implements a write ahead log of F using W. Call wal.F.ReadAt to perform
+// 'read-commited' reads.  Call wal.ReadAt to perform 'read uncommitted' reads.
+// Call wal.W.ReadAt to read the write ahead log itself.
 //
 // Concurrency
 //
-// ReadAt (read uncommitted) is safe for concurrent use by multiple goroutines
-// so multiple readers are fine, but multiple readers and a single writer is
-// not. However, F.ReadAt (read committed) is safe to run concurrently with any
-// WAL method except Commit. In a typical DB isolation scenario the setup is
-// something like
+// wal.ReadAt (read uncommitted) is safe for concurrent use by multiple
+// goroutines so multiple readers are fine, but multiple readers and a single
+// writer is not. However, wal.F.ReadAt (read committed) is safe to run
+// concurrently with any WAL method except Commit. In a typical DB isolation
+// scenario the setup is something like
 //
-//	var db *file.WAL
-//	var mu sync.RWMutex		// The mutex associated with db.
+//	var wal *file.WAL
+//	var mu sync.RWMutex		// The mutex associated with wal.
 //
 //	// in another goroutine
 //	mu.RLock()			// read isolated, concurrently with other readers
-//	n, err := db.F.ReadAt(buf, off) // note the F
+//	n, err := wal.F.ReadAt(buf, off) // note the F
 //	...
 //	// reads are isolated only until the next RUnlock.
 //	mu.RUnlock()
-//	// db.Commit and mutating of F is now possible.
+//	// wal.Commit and mutating of F is now possible.
 //	...
 //
 //	// in another goroutine (writers serialization not considered in this example)
-//	n, err := db.WriteAt(buf, off)
+//	n, err := wal.WriteAt(buf, off)
 //	...
 //
 //	// and eventually somewhere
 //	mu.Lock()
-//	err := db.Commit()
+//	err := wal.Commit()
 //	...
 //	mu.Unlock()
 //	...
@@ -141,20 +141,21 @@ func (f *fileInfo) Sys() interface{}   { return f.sys }
 // valid and non empty. If NewWAL is passed a valid, non empty W in its w
 // argument, NewWAL restarts journal replay.
 type WAL struct {
-	F        File // The f argument of NewWAL for convenience. R/O
-	W        File // The w argument of NewWAL for convenience. R/O
-	b8       [szInt64]byte
-	fileMode os.FileMode
-	m        map[int64]int64 // foff: woff
-	modTime  time.Time
-	name     string
-	nfo      [unsafe.Sizeof(nfo{})]byte
-	pageMask int64
-	pageSize int
-	size     int64
-	size0    int64
-	skip     int64
-	sys      interface{}
+	F            File // The f argument of NewWAL for convenience. R/O
+	W            File // The w argument of NewWAL for convenience. R/O
+	b8           [szInt64]byte
+	fileMode     os.FileMode
+	m            map[int64]int64 // foff: woff
+	modTime      time.Time
+	name         string
+	nfo          [unsafe.Sizeof(nfo{})]byte
+	pageMask     int64
+	pageSize     int
+	rollbakcSize int64
+	size         int64
+	size0        int64
+	skip         int64
+	sys          interface{}
 }
 
 // NewWAL returns a newly created WAL or an error, if any. The f argument is
@@ -168,7 +169,7 @@ type WAL struct {
 // If w contains a valid, non empty write-ahead log, it's first committed to f
 // and emptied. If w contains an invalid or unreadable write ahead log, the
 // function returns an error.
-func NewWAL(f, w File, skip int64, pageLog int) (*WAL, error) {
+func NewWAL(f, w File, skip int64, pageLog int) (r *WAL, err error) {
 	if pageLog < 1 {
 		panic(fmt.Errorf("NewWAL: invalid pageLog %v", pageLog))
 	}
@@ -183,19 +184,21 @@ func NewWAL(f, w File, skip int64, pageLog int) (*WAL, error) {
 		return nil, err
 	}
 
-	r := &WAL{
-		F:        f,
-		W:        w,
-		fileMode: fi.Mode(),
-		m:        map[int64]int64{},
-		modTime:  fi.ModTime(),
-		name:     fi.Name(),
-		pageMask: int64(pageSize) - 1,
-		pageSize: pageSize,
-		size0:    fi.Size(),
-		size:     fi.Size(),
-		skip:     skip,
-		sys:      fi.Sys(),
+	sz := fi.Size()
+	r = &WAL{
+		F:            f,
+		W:            w,
+		fileMode:     fi.Mode(),
+		m:            map[int64]int64{},
+		modTime:      fi.ModTime(),
+		name:         fi.Name(),
+		pageMask:     int64(pageSize) - 1,
+		pageSize:     pageSize,
+		rollbakcSize: sz,
+		size0:        sz,
+		size:         sz,
+		skip:         skip,
+		sys:          fi.Sys(),
 	}
 	binary.BigEndian.PutUint64(r.nfo[unsafe.Offsetof(nfo{}.PageSize):], uint64(pageSize))
 	binary.BigEndian.PutUint64(r.nfo[unsafe.Offsetof(nfo{}.Skip):], uint64(skip))
@@ -571,10 +574,11 @@ func (w *WAL) commit(h int64) error {
 		w.m = map[int64]int64{}
 	}
 	w.size0 = w.size
+	w.rollbakcSize = w.size
 	return nil
 }
 
-// Rolback empties the WAL journal without transferring it to F.
+// Rollback empties the WAL journal without transferring it to F.
 func (w *WAL) Rollback() error {
 	if err := w.W.Truncate(w.skip); err != nil {
 		return err
@@ -587,5 +591,7 @@ func (w *WAL) Rollback() error {
 	for k := range w.m {
 		delete(w.m, k)
 	}
+	w.size0 = w.rollbakcSize
+	w.size = w.rollbakcSize
 	return nil
 }

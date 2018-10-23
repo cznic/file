@@ -37,7 +37,7 @@ const (
 	oPagePrev     = int64(unsafe.Offsetof(page{}.prev))
 	oPageRank     = int64(unsafe.Offsetof(page{}.rank))
 	oPageSize     = int64(unsafe.Offsetof(page{}.size))
-	oPageUsed     = int64(unsafe.Offsetof(page{}.used))
+	oPageUsed     = int64(unsafe.Offsetof(page{}.usedSlots))
 	pageAvail     = pageSize - szPage - szInt64
 	pageBits      = 12
 	pageMask      = pageSize - 1
@@ -96,6 +96,7 @@ func pageRank(n int64) int {
 	return r
 }
 
+// Get an int64 from b. len(b) must be >= 8.
 func read(b []byte) int64 {
 	var n int64
 	for _, v := range b[:8] {
@@ -130,6 +131,7 @@ func slotRank(n int) int {
 	return log(roundup(n, allocAllign)) - 4
 }
 
+// Put an int64 in b. len(b) must be >= 8.
 func write(b []byte, n int64) {
 	b = b[:8]
 	for i := range b {
@@ -138,23 +140,26 @@ func write(b []byte, n int64) {
 	}
 }
 
+// node is a double linked list item in File.
 type node struct {
 	prev, next int64
 }
 
+// memNode is the memory representation of a loaded node.
 type memNode struct {
 	*Allocator
 	dirty bool
 	node
-	off int64
+	off int64 // Offset of the node in File.
 }
 
+// flush stores/persists m if dirty.
 func (m *memNode) flush() error {
 	if !m.dirty {
 		return nil
 	}
 
-	p := buffer.Get(int(szNode))
+	p := buffer.Get(int(szNode)) //TODO Static alloc
 	b := *p
 	write(b[oNodeNext:], m.next)
 	write(b[oNodePrev:], m.prev)
@@ -164,11 +169,16 @@ func (m *memNode) flush() error {
 	return err
 }
 
+// setNext sets m's next link.
 func (m *memNode) setNext(n int64) { m.next = n; m.dirty = true }
+
+// setPrev sets m's prev link.
 func (m *memNode) setPrev(n int64) { m.prev = n; m.dirty = true }
 
+// unlink removes m from the list it belongs to.
 func (m *memNode) unlink(rank int) error {
 	if m.prev != 0 {
+		// Turn m.prev -> m -> m.next into m.prev -> m.next
 		prev, err := m.openNode(m.prev)
 		if err != nil {
 			return err
@@ -181,6 +191,7 @@ func (m *memNode) unlink(rank int) error {
 	}
 
 	if m.next != 0 {
+		// Turn m.prev <- m <- m.next into m.prev <- m.next
 		next, err := m.openNode(m.next)
 		if err != nil {
 			return err
@@ -192,21 +203,23 @@ func (m *memNode) unlink(rank int) error {
 		}
 	}
 
-	if m.slots[rank] == m.off {
+	if m.slots[rank] == m.off { // m was the head of a slot list
 		m.setSlot(rank, m.next)
 	}
 
 	return nil
 }
 
+// page is a page header in File.
 type page struct {
 	brk int64
 	node
-	rank int64
-	size int64
-	used int64
+	rank      int64
+	size      int64
+	usedSlots int64
 }
 
+// memPage is the memory representation of a loaded page.
 type memPage struct {
 	*Allocator
 	dirty bool
@@ -214,19 +227,20 @@ type memPage struct {
 	page
 }
 
+// flush stores/persists m if dirty.
 func (m *memPage) flush() error {
 	if !m.dirty {
 		return nil
 	}
 
-	p := buffer.Get(int(szPage))
+	p := buffer.Get(int(szPage)) //TODO Static alloc
 	b := *p
 	write(b[oPageBrk:], m.brk)
 	write(b[oPageNext:], m.next)
 	write(b[oPagePrev:], m.prev)
 	write(b[oPageRank:], m.rank)
 	write(b[oPageSize:], m.size)
-	write(b[oPageUsed:], m.used)
+	write(b[oPageUsed:], m.usedSlots)
 	_, err := m.f.WriteAt(b, m.off)
 	m.dirty = err == nil
 	buffer.Put(p)
@@ -234,8 +248,8 @@ func (m *memPage) flush() error {
 }
 
 func (m *memPage) freeSlots() error {
-	if m.used != 0 {
-		return fmt.Errorf("internal error: %T.freeSlots: m.used %v", m, m.used)
+	if m.usedSlots != 0 {
+		return fmt.Errorf("internal error: %T.freeSlots: m.used %v", m, m.usedSlots)
 	}
 
 	for i := 0; i < int(m.brk); i++ {
@@ -261,8 +275,24 @@ func (m *memPage) setPrev(n int64) { m.prev = n; m.dirty = true }
 func (m *memPage) setRank(n int64) { m.rank = n; m.dirty = true }
 func (m *memPage) setSize(n int64) { m.size = n; m.dirty = true }
 
+func (m *memPage) getTail() (int64, error) {
+	p := buffer.Get(8) //TODO Static alloc
+	b := *p
+	if n, err := m.f.ReadAt(b, m.off+m.size-szInt64); n != len(b) {
+		if err == nil {
+			err = fmt.Errorf("short read")
+		}
+		buffer.Put(p)
+		return -1, fmt.Errorf("%T.getTail: %v", m, err)
+	}
+
+	r := read(b)
+	buffer.Put(p)
+	return r, nil
+}
+
 func (m *memPage) setTail(n int64) error {
-	p := buffer.Get(8)
+	p := buffer.Get(8) //TODO Static alloc
 	b := *p
 	write(b, n)
 	_, err := m.f.WriteAt(b, m.off+m.size-szInt64)
@@ -270,7 +300,7 @@ func (m *memPage) setTail(n int64) error {
 	return err
 }
 
-func (m *memPage) setUsed(n int64)  { m.used = n; m.dirty = true }
+func (m *memPage) setUsed(n int64)  { m.usedSlots = n; m.dirty = true }
 func (m *memPage) slot(i int) int64 { return m.off + szPage + int64(i)<<uint(m.rank+4) }
 
 func (m *memPage) split(need int64) (int64, error) {
@@ -305,7 +335,7 @@ func (m *memPage) split(need int64) (int64, error) {
 		return -1, err
 	}
 
-	return m.off + szPage, m.Allocator.flush()
+	return m.off + szPage, m.Allocator.flush(m.autoflush)
 }
 
 func (m *memPage) unlink() error {
@@ -354,6 +384,15 @@ type File interface {
 	WriteAt(p []byte, off int64) (n int, err error)
 }
 
+// Mem returns a volatile File backed only by process memory or an error, if
+// any. The Close method of the result must be eventually called to avoid
+// resource leaks.
+func Mem(name string) (File, error) { return ifile.OpenMem(name) }
+
+// Map returns a File backed by memory mapping f or an error, if any. The Close
+// method of the result must be eventually called to avoid resource leaks.
+func Map(f *os.File) (File, error) { return ifile.Open(f) }
+
 type file struct {
 	_ [16]byte // User area. Magic file number etc.
 
@@ -375,14 +414,16 @@ type testStat struct {
 // Callers must provide their own synchronization when it's used concurrently
 // by multiple goroutines.
 type Allocator struct {
-	buf   []byte
-	bufp  *[]byte
-	cap   [slotRanks]int
-	dirty bool
-	f     File
+	buf  []byte
+	bufp *[]byte
+	cap  [slotRanks]int
+	f    File
 	file
 	fsize int64
 	testStat
+
+	autoflush bool
+	dirty     bool
 }
 
 // NewAllocator returns a newly created Allocator managing f or an eror, if
@@ -394,9 +435,10 @@ func NewAllocator(f File) (*Allocator, error) {
 	}
 
 	a := &Allocator{
-		bufp:  buffer.CGet(int(szFile - oFileSkip)),
-		f:     f,
-		fsize: fi.Size(),
+		autoflush: true,
+		bufp:      buffer.CGet(int(szFile - oFileSkip)),
+		f:         f,
+		fsize:     fi.Size(),
 	}
 	a.buf = *a.bufp
 	for i := range a.cap {
@@ -408,8 +450,12 @@ func NewAllocator(f File) (*Allocator, error) {
 		if _, err := f.WriteAt(a.buf, oFileSkip); err != nil {
 			return nil, err
 		}
+		a.fsize = oFileSkip + int64(len(a.buf))
 	default:
 		if n, err := f.ReadAt(a.buf, oFileSkip); n != len(a.buf) {
+			if err == nil {
+				err = fmt.Errorf("short read")
+			}
 			return nil, err
 		}
 
@@ -427,6 +473,14 @@ func NewAllocator(f File) (*Allocator, error) {
 	}
 	return a, nil
 }
+
+// SetAutoFlush turns on/off automatic flushing of allocator's metadata. When
+// the argument is true Flush is called automatically whenever the metadata are
+// chaneged. When the argument is false, Flush is called automatically only on
+// Close.
+//
+// The default allocator state has auto flushing turned on.
+func (a *Allocator) SetAutoFlush(v bool) { a.autoflush = v }
 
 // Alloc allocates a file block large enough for storing size bytes and returns
 // its offset or an error, if any.
@@ -468,7 +522,7 @@ func (a *Allocator) Alloc(size int64) (int64, error) {
 		return -1, err
 	}
 
-	return p.slot(0), a.flush()
+	return p.slot(0), a.flush(a.autoflush)
 }
 
 // Calloc is like Alloc but the allocated file block is zeroed up to size.
@@ -498,9 +552,9 @@ func (a *Allocator) Calloc(size int64) (int64, error) {
 	return off, nil
 }
 
-// Close closes a and its underlying File.
+// Close flushes and closes the allocator and its underlying File.
 func (a *Allocator) Close() error {
-	if err := a.flush(); err != nil {
+	if err := a.Flush(); err != nil {
 		return err
 	}
 
@@ -525,27 +579,27 @@ func (a *Allocator) Free(off int64) error {
 			return err
 		}
 
-		return a.flush()
+		return a.flush(a.autoflush)
 	}
 
-	p.setUsed(p.used - 1)
+	p.setUsed(p.usedSlots - 1)
 	if err := a.insertSlot(int(p.rank), off); err != nil {
 		return err
 	}
 
-	if p.used == 0 {
+	if p.usedSlots == 0 {
 		if err := a.freePage(p); err != nil {
 			return err
 		}
 
-		return a.flush()
+		return a.flush(a.autoflush)
 	}
 
 	if err := p.flush(); err != nil {
 		return err
 	}
 
-	return a.flush()
+	return a.flush(a.autoflush)
 }
 
 // Realloc changes the size of the file block allocated at off, which must have
@@ -594,6 +648,9 @@ func (a *Allocator) Realloc(off, size int64) (int64, error) {
 	for rem != 0 {
 		n, err := a.f.ReadAt(b, src)
 		if n == 0 {
+			if err == nil {
+				err = fmt.Errorf("short read")
+			}
 			return -1, err
 		}
 
@@ -653,7 +710,7 @@ func (a *Allocator) allocBig(size int64) (int64, error) {
 		return -1, err
 	}
 
-	return p.off + szPage, a.flush()
+	return p.off + szPage, a.flush(a.autoflush)
 }
 
 func (a *Allocator) allocBig2(off int64) (int64, error) {
@@ -674,7 +731,7 @@ func (a *Allocator) allocBig2(off int64) (int64, error) {
 		return -1, err
 	}
 
-	return p.off + szPage, a.flush()
+	return p.off + szPage, a.flush(a.autoflush)
 }
 
 func (a *Allocator) allocMaxRank(p *memPage, need int64) (int64, error) {
@@ -711,7 +768,7 @@ func (a *Allocator) allocMaxRank(p *memPage, need int64) (int64, error) {
 		}
 	}
 
-	return p.off + szPage, a.flush()
+	return p.off + szPage, a.flush(a.autoflush)
 }
 
 func (a *Allocator) allocSlot(off int64, rank int) (int64, error) {
@@ -729,12 +786,12 @@ func (a *Allocator) allocSlot(off int64, rank int) (int64, error) {
 		return -1, err
 	}
 
-	p.setUsed(p.used + 1)
+	p.setUsed(p.usedSlots + 1)
 	if err := p.flush(); err != nil {
 		return -1, err
 	}
 
-	return off, a.flush()
+	return off, a.flush(a.autoflush)
 }
 
 func (a *Allocator) check(n, min, max int64) (int64, error) {
@@ -745,8 +802,13 @@ func (a *Allocator) check(n, min, max int64) (int64, error) {
 	return n, nil
 }
 
-func (a *Allocator) flush() error {
-	if !a.dirty {
+// Flush writes the allocator metadata to its backing File.
+//
+// Note: Close calls Flush automatically.
+func (a *Allocator) Flush() error { return a.flush(true) }
+
+func (a *Allocator) flush(v bool) error {
+	if !v || !a.dirty {
 		return nil
 	}
 
@@ -757,7 +819,7 @@ func (a *Allocator) flush() error {
 		write(a.buf[int(oFileSlots-oFileSkip)+8*i:], v)
 	}
 	_, err := a.f.WriteAt(a.buf, oFileSkip)
-	a.dirty = err == nil
+	a.dirty = err != nil
 	return err
 }
 
@@ -802,8 +864,8 @@ func (a *Allocator) freeLastPage(p *memPage) error {
 }
 
 func (a *Allocator) freePage(p *memPage) error {
-	if p.used != 0 {
-		return fmt.Errorf("internal error: %T.freePage: p.used %v", a, p.used)
+	if p.usedSlots != 0 {
+		return fmt.Errorf("internal error: %T.freePage: p.used %v", a, p.usedSlots)
 	}
 
 	if p.off+p.size == a.fsize {
@@ -897,10 +959,14 @@ func (a *Allocator) newSharedPage(rank int) (*memPage, error) {
 	return p, p.setTail(0)
 }
 
-func (a *Allocator) openNode(off int64) (*memNode, error) {
-	p := buffer.Get(int(szNode))
+// openNode returns a memNode from a node at File offset off.
+func (a *Allocator) openNode(off int64) (*memNode, error) { //TODO return value, not pointer
+	p := buffer.Get(int(szNode)) //TODO Static alloc
 	b := *p
 	if n, err := a.f.ReadAt(b, off); n != len(b) {
+		if err == nil {
+			err = fmt.Errorf("short read")
+		}
 		return nil, err
 	}
 
@@ -916,10 +982,13 @@ func (a *Allocator) openNode(off int64) (*memNode, error) {
 	return m, nil
 }
 
-func (a *Allocator) openPage(off int64) (*memPage, error) {
-	p := buffer.Get(int(szPage))
+func (a *Allocator) openPage(off int64) (*memPage, error) { //TODO return value, not pointer
+	p := buffer.Get(int(szPage)) //TODO Static alloc
 	b := *p
 	if n, err := a.f.ReadAt(b, off); n != len(b) {
+		if err == nil {
+			err = fmt.Errorf("short read")
+		}
 		return nil, err
 	}
 
@@ -932,9 +1001,9 @@ func (a *Allocator) openPage(off int64) (*memPage, error) {
 				next: read(b[oPageNext:]),
 				prev: read(b[oPagePrev:]),
 			},
-			rank: read(b[oPageRank:]),
-			size: read(b[oPageSize:]),
-			used: read(b[oPageUsed:]),
+			rank:      read(b[oPageRank:]),
+			size:      read(b[oPageSize:]),
+			usedSlots: read(b[oPageUsed:]),
 		},
 	}
 	buffer.Put(p)
@@ -942,9 +1011,12 @@ func (a *Allocator) openPage(off int64) (*memPage, error) {
 }
 
 func (a *Allocator) read(off int64) (int64, error) {
-	p := buffer.Get(8)
+	p := buffer.Get(8) //TODO Static alloc
 	b := *p
 	if n, err := a.f.ReadAt(b, off); n != len(b) {
+		if err == nil {
+			err = fmt.Errorf("short read")
+		}
 		return -1, err
 	}
 
@@ -963,7 +1035,7 @@ func (a *Allocator) sbrk(off int64, rank int) (int64, error) {
 		panic(fmt.Errorf("internal error: %T.sbrk: rank %v, p.rank %v", a, rank, p.rank))
 	}
 
-	p.setUsed(p.used + 1)
+	p.setUsed(p.usedSlots + 1)
 	p.setBrk(p.brk + 1)
 	if int(p.brk) == a.cap[rank] {
 		if err := p.unlink(); err != nil {
@@ -974,7 +1046,7 @@ func (a *Allocator) sbrk(off int64, rank int) (int64, error) {
 		return -1, err
 	}
 
-	return p.slot(int(p.brk) - 1), a.flush()
+	return p.slot(int(p.brk) - 1), a.flush(a.autoflush)
 }
 
 func (a *Allocator) sbrk2(off int64, rank int) (int64, error) {
@@ -1002,7 +1074,7 @@ func (a *Allocator) sbrk2(off int64, rank int) (int64, error) {
 		return -1, err
 	}
 
-	return p.off + szPage, a.flush()
+	return p.off + szPage, a.flush(a.autoflush)
 }
 
 func (a *Allocator) setPage(rank int, n int64) { a.pages[rank] = n; a.dirty = true }
@@ -1029,11 +1101,238 @@ func (a *Allocator) usableSize(off int64) (int64, *memPage, error) {
 	return p.size - szPage - szInt64, p, nil
 }
 
-// Mem returns a volatile File backed only by process memory or an error, if
-// any. The Close method of the result must be eventually called to avoid
-// resource leaks.
-func Mem(name string) (File, error) { return ifile.OpenMem(name) }
+type bitmap struct {
+	m   File
+	buf []byte
+}
 
-// Map returns a File backed by memory mapping f or an error, if any. The Close
-// method of the result must be eventually called to avoid resource leaks.
-func Map(f *os.File) (File, error) { return ifile.Open(f) }
+func newBitmap() (*bitmap, error) {
+	m, err := Mem("bitmap")
+	if err != nil {
+		return nil, fmt.Errorf("mmap: %v", err)
+	}
+
+	return &bitmap{
+		m:   m,
+		buf: make([]byte, 1),
+	}, nil
+}
+
+func (m *bitmap) close() error {
+	if m.m == nil {
+		return nil
+	}
+
+	r := m.m.Close()
+	m.m = nil
+	return r
+}
+
+func (m *bitmap) set(bit int64) (bool, error) {
+	off := bit >> 3
+	mask := byte(1) << byte(bit&7)
+	m.buf[0] = 0
+	if _, err := m.m.ReadAt(m.buf, off); err != nil {
+		if err != io.EOF {
+			return false, fmt.Errorf("%T.read(%#x): %v", m, off, err)
+		}
+	}
+
+	r := m.buf[0]&mask != 0
+	m.buf[0] |= mask
+	if _, err := m.m.WriteAt(m.buf, off); err != nil {
+		return false, fmt.Errorf("%T.write(%#x): %v", m, off, err)
+	}
+
+	return r, nil
+}
+
+// VerifyOptions optionally provide more information from Verify.
+type VerifyOptions struct {
+	Allocs    int64 // Number of allocations in use.
+	Pages     int64 // Number of pages.
+	UsedPages int64 // Number of pages in use.
+}
+
+// Verify audits the correctness of the allocator and its backing File.
+func (a *Allocator) Verify(opt *VerifyOptions) error {
+	// Ensure disk and allocator are in sync.
+	if err := a.Flush(); err != nil {
+		return fmt.Errorf("cannot flush: %v", err)
+	}
+
+	fi, err := a.f.Stat()
+	if err != nil {
+		return fmt.Errorf("cannot stat: %v", err)
+	}
+
+	if g, e := fi.Size(), a.fsize; g != e {
+		return fmt.Errorf("invalid file size, got %#x, expected %#x", g, e)
+	}
+
+	if g, e := a.cap, [...]int{252, 126, 63, 31, 15, 7, 3}; g != e {
+		return fmt.Errorf("invalid page capacities, got %v, expected %v", g, e)
+	}
+
+	// Check file header.
+	pm := map[int64]struct{}{}
+	sm := map[int64]struct{}{}
+	if a.fsize > oFileSkip {
+		buf := make([]byte, int(szFile-oFileSkip))
+		if n, err := a.f.ReadAt(buf, oFileSkip); n != len(a.buf) {
+			if err == nil {
+				err = fmt.Errorf("short read")
+			}
+			return fmt.Errorf("cannot read file header: %v", err)
+		}
+
+		max := a.fsize - szPage
+		for i, e := range a.pages {
+			g, err := a.check(read(buf[int(oFilePages-oFileSkip)+8*i:]), 0, max)
+			if err != nil {
+				return fmt.Errorf("cannot read pages list[%v]: %v", i, err)
+			}
+			if g != e {
+				return fmt.Errorf("invalid pages list[%v], got %v, expected %v", i, g, e)
+			}
+
+			if g == 0 {
+				continue
+			}
+
+			if (g-szFile)&((1<<pageBits)-1) != 0 {
+				return fmt.Errorf("invalid pages lists[%v] head: %#x", i, g)
+			}
+
+			if _, ok := pm[g]; ok && g != 0 {
+				return fmt.Errorf("pages list[%v] reused: %#x", i, g)
+			}
+
+			pm[g] = struct{}{}
+		}
+		for i, e := range a.slots {
+			g, err := a.check(read(buf[int(oFileSlots-oFileSkip)+8*i:]), 0, max)
+			if err != nil {
+				return fmt.Errorf("cannot read slots list[%v]: %v", i, err)
+			}
+
+			if g != e {
+				return fmt.Errorf("invalid slots list[%v], got %v, expected %v", i, g, e)
+			}
+
+			if g == 0 {
+				continue
+			}
+
+			if _, ok := sm[g]; ok && g != 0 {
+				return fmt.Errorf("slots list[%v] reused: %#x", i, g)
+			}
+
+			sm[g] = struct{}{}
+		}
+	}
+
+	// Check pages.
+	var npages, usedPages, allocs int64
+	off := szFile
+	for off < a.fsize {
+		off2 := off - szFile
+		if off2&((1<<pageBits)-1) != 0 {
+			return fmt.Errorf("invalid page boundary %#x", off)
+		}
+
+		p, err := a.openPage(off)
+		if err != nil {
+			return fmt.Errorf("cannot read page at %#x: %v", off, err)
+		}
+
+		tailSize, err := p.getTail()
+		if err != nil {
+			return fmt.Errorf("cannot read tail of page %#x: %v", off, err)
+		}
+
+		if tailSize != 0 { // page in use
+			usedPages++
+			switch {
+			case p.rank <= maxSharedRank:
+				allocs += p.usedSlots
+			default:
+				allocs++
+			}
+
+		}
+
+		delete(pm, off)
+		npages++
+		off += p.size
+	}
+	if len(pm) != 0 {
+		return fmt.Errorf("invalid pages lists heads: %#x", pm)
+	}
+
+	if g, e := npages, a.npages; g != e && e != 0 {
+		return fmt.Errorf("invalid number of file pages, got %v, expected %v", g, e)
+	}
+
+	if g, e := off, a.fsize; g != e {
+		return fmt.Errorf("last file page does not end at file end, got %v, expected %v", g, e)
+	}
+
+	// Check page lists linking.
+	bits, err := newBitmap()
+	if err != nil {
+		return fmt.Errorf("cannot create bitmap: %v", err)
+	}
+
+	defer bits.close()
+
+	for i, off := range a.pages {
+		// Walk the single list.
+		for off != 0 {
+			v, err := bits.set(off)
+			if err != nil {
+				return fmt.Errorf("%v: bitmap.set(%#x): %v", i, off, err)
+			}
+
+			if v {
+				return fmt.Errorf("%v: page listed multiple times %#x", i, off)
+			}
+
+			p, err := a.openPage(off)
+			if err != nil {
+				return fmt.Errorf("cannot read page at %#x: %v", off, err)
+			}
+
+			off = p.next
+		}
+	}
+
+	// Check slots lists linking.
+	for i, off := range a.slots {
+		// Walk the single list.
+		for off != 0 {
+			v, err := bits.set(off)
+			if err != nil {
+				return fmt.Errorf("%v: bitmap.set(%#x): %v", i, off, err)
+			}
+
+			if v {
+				return fmt.Errorf("%v: slot listed multiple times %#x", i, off)
+			}
+
+			p, err := a.openNode(off)
+			if err != nil {
+				return fmt.Errorf("cannot read node at %#x: %v", off, err)
+			}
+
+			off = p.next
+		}
+	}
+
+	if opt != nil {
+		opt.Allocs = allocs
+		opt.Pages = a.npages
+		opt.UsedPages = usedPages
+	}
+	return nil
+}

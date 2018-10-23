@@ -225,6 +225,12 @@ func TestCap(t *testing.T) {
 
 	defer f.Close()
 
+	defer func() {
+		if err := f.Verify(nil); err != nil {
+			t.Error(err)
+		}
+	}()
+
 	if g, e := f.cap, [...]int{252, 126, 63, 31, 15, 7, 3}; g != e {
 		t.Fatal(g, e)
 	}
@@ -264,6 +270,10 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 		a = append(a, p.off)
 		rem -= size
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	for i := len(a) - 1; i >= 0; i-- {
 		p, err := f.openPage(a[i])
@@ -275,7 +285,7 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 			t.Fatal(err)
 		}
 	}
-	if err := f.flush(); err != nil {
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -303,6 +313,10 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 		a = append(a, p.off)
 		rem -= size
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	for _, off := range a {
 		p, err := f.openPage(off)
@@ -314,7 +328,7 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 			t.Fatal(err)
 		}
 	}
-	if err := f.flush(); err != nil {
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -342,6 +356,10 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 		a = append(a, p.off)
 		rem -= size
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	for i := range a {
 		j := rng.Next() % len(a)
@@ -357,7 +375,7 @@ func testPageAlloc(t *testing.T, f0 File, quota, max int) {
 			t.Fatal(err)
 		}
 	}
-	if err := f.flush(); err != nil {
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -415,7 +433,7 @@ func benchmarkPageAlloc(b *testing.B, tmp func(testing.TB) (File, func()), quota
 
 				rem -= size
 			}
-			if err := f.flush(); err != nil {
+			if err := f.Flush(); err != nil {
 				b.Fatal(err)
 			}
 
@@ -481,6 +499,9 @@ func testAlloc(t *testing.T, f0 File, quota, max int) {
 		a = append(a, off)
 		rem -= size
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	srng.Seek(0)
@@ -534,7 +555,7 @@ func testAlloc(t *testing.T, f0 File, quota, max int) {
 		}
 	}
 
-	if err := f.flush(); err != nil {
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -608,6 +629,9 @@ func testAlloc2(t *testing.T, f0 File, quota, max int) {
 		a = append(a, off)
 		rem -= size
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	srng.Seek(0)
@@ -649,7 +673,7 @@ func testAlloc2(t *testing.T, f0 File, quota, max int) {
 		}
 	}
 
-	if err := f.flush(); err != nil {
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -762,6 +786,9 @@ func testAlloc3(t *testing.T, f0 File, quota, max int) {
 			}
 		}
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	// Verify & free
@@ -800,7 +827,7 @@ func testAlloc3(t *testing.T, f0 File, quota, max int) {
 		}
 	}
 
-	if err := f.flush(); err != nil {
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -929,6 +956,9 @@ func testReopen(t *testing.T, quota, max int) {
 			}
 		}
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	ts := f.testStat
@@ -987,7 +1017,7 @@ func testReopen(t *testing.T, quota, max int) {
 		}
 	}
 
-	if err := f.flush(); err != nil {
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1089,6 +1119,9 @@ func testCalloc(t *testing.T, f0 File, quota, max int) {
 			}
 		}
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	// Verify & free
@@ -1119,7 +1152,7 @@ func testCalloc(t *testing.T, f0 File, quota, max int) {
 		}
 	}
 
-	if err := f.flush(); err != nil {
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1282,6 +1315,9 @@ func testRealloc(t *testing.T, f0 File, quota, max int) {
 			}
 		}
 	}
+	if err := f.Verify(nil); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("quota %v, max %v, allocs %v, bytes %v, pages %v, fsize %v", quota, max, f.allocs, f.bytes, f.npages, f.fsize)
 	// Verify & free
@@ -1320,7 +1356,7 @@ func testRealloc(t *testing.T, f0 File, quota, max int) {
 		}
 	}
 
-	if err := f.flush(); err != nil {
+	if err := f.Verify(nil); err != nil {
 		t.Fatal(err)
 	}
 
