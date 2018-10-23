@@ -1129,6 +1129,11 @@ func (m *bitmap) close() error {
 }
 
 func (m *bitmap) set(bit int64) (bool, error) {
+	if bit&15 != 0 {
+		return false, fmt.Errorf("%T.set(%#x): != 0 (mod 16)", m, bit)
+	}
+
+	bit >>= 4
 	off := bit >> 3
 	mask := byte(1) << byte(bit&7)
 	m.buf[0] = 0
