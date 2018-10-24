@@ -22,7 +22,11 @@ import (
 )
 
 const (
-	allocAllign   = 16
+	// File offsets of allocations = 0 (mod AllocAllign).
+	AllocAllign = 16
+	// First allocation of an empty File will have this offset.
+	LowestAllocationOffset = szFile + szPage
+
 	bufSize       = 1 << 20 // Calloc, Realloc.
 	firstPageRank = maxSharedRank + 1
 	maxSharedRank = slotRanks - 1
@@ -57,7 +61,7 @@ var (
 )
 
 func init() {
-	if szFile%allocAllign != 0 || szFile != 256 || szNode%allocAllign != 0 || szPage%allocAllign != 0 {
+	if szFile%AllocAllign != 0 || szFile != 256 || szNode%AllocAllign != 0 || szPage%AllocAllign != 0 {
 		panic("internal error: invalid configuration")
 	}
 }
@@ -128,7 +132,7 @@ func slotRank(n int) int {
 		panic(fmt.Errorf("internal error: slotRank(%v)", n))
 	}
 
-	return log(roundup(n, allocAllign)) - 4
+	return log(roundup(n, AllocAllign)) - 4
 }
 
 // Put an int64 in b. len(b) must be >= 8.
