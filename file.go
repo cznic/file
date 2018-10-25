@@ -13,6 +13,7 @@ package file
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"unsafe"
 
@@ -475,13 +476,20 @@ func (a *Allocator) SetFile(f File) error {
 			return err
 		}
 
-		max := fsize - szPage
+		max := fsize - pageSize
+		if fsize == szFile {
+			max = 0
+		}
 		for i := range a.pages {
 			if a.pages[i], err = a.check(read(a.buf[int(oFilePages-oFileSkip)+8*i:]), 0, max); err != nil {
 				return err
 			}
 		}
 		for i := range a.slots {
+			max := fsize - 16<<uint(i)
+			if fsize == szFile {
+				max = 0
+			}
 			if a.slots[i], err = a.check(read(a.buf[int(oFileSlots-oFileSkip)+8*i:]), 0, max); err != nil {
 				return err
 			}
@@ -814,7 +822,7 @@ func (a *Allocator) allocSlot(off int64, rank int) (int64, error) {
 
 func (a *Allocator) check(n, min, max int64) (int64, error) {
 	if n < min || n > max {
-		return 0, fmt.Errorf("corrupted file")
+		return 0, fmt.Errorf("corrupted file: %#x not in [%#x, %#x]", n, min, max)
 	}
 
 	return n, nil
@@ -1120,19 +1128,29 @@ func (a *Allocator) usableSize(off int64) (int64, *memPage, error) {
 }
 
 type bitmap struct {
+	fn  string
 	m   File
 	buf []byte
 }
 
 func newBitmap() (*bitmap, error) {
-	m, err := Mem("bitmap")
+	f, err := ioutil.TempFile("", "")
 	if err != nil {
-		return nil, fmt.Errorf("mmap: %v", err)
+		return nil, err
+	}
+
+	fn := f.Name()
+	m, err := Map(f)
+	if err != nil {
+		f.Close()
+		os.Remove(fn)
+		return nil, err
 	}
 
 	return &bitmap{
-		m:   m,
 		buf: make([]byte, 1),
+		fn:  fn,
+		m:   m,
 	}, nil
 }
 
@@ -1142,6 +1160,7 @@ func (m *bitmap) close() error {
 	}
 
 	r := m.m.Close()
+	os.Remove(m.fn)
 	m.m = nil
 	return r
 }
@@ -1189,6 +1208,10 @@ func (a *Allocator) Verify(opt *VerifyOptions) error {
 		return fmt.Errorf("cannot stat: %v", err)
 	}
 
+	if g, e := fi.Size(), szFile; g < e {
+		return fmt.Errorf("invalid file size, got %#x, expected at least %#x", g, e)
+	}
+
 	if g, e := fi.Size(), a.fsize; g != e {
 		return fmt.Errorf("invalid file size, got %#x, expected %#x", g, e)
 	}
@@ -1200,59 +1223,64 @@ func (a *Allocator) Verify(opt *VerifyOptions) error {
 	// Check file header.
 	pm := map[int64]struct{}{}
 	sm := map[int64]struct{}{}
-	if a.fsize > oFileSkip {
-		buf := make([]byte, int(szFile-oFileSkip))
-		if n, err := a.f.ReadAt(buf, oFileSkip); n != len(a.buf) {
-			if err == nil {
-				err = fmt.Errorf("short read")
-			}
-			return fmt.Errorf("cannot read file header: %v", err)
+	buf := make([]byte, int(szFile-oFileSkip))
+	if n, err := a.f.ReadAt(buf, oFileSkip); n != len(a.buf) {
+		if err == nil {
+			err = fmt.Errorf("short read")
+		}
+		return fmt.Errorf("cannot read file header: %v", err)
+	}
+
+	max := a.fsize - pageSize
+	if a.fsize == szFile {
+		max = 0
+	}
+	for i, e := range a.pages {
+		g, err := a.check(read(buf[int(oFilePages-oFileSkip)+8*i:]), 0, max)
+		if err != nil {
+			return fmt.Errorf("cannot read pages list[%v]: %v", i, err)
+		}
+		if g != e {
+			return fmt.Errorf("invalid pages list[%v], got %v, expected %v", i, g, e)
 		}
 
-		max := a.fsize - szPage
-		for i, e := range a.pages {
-			g, err := a.check(read(buf[int(oFilePages-oFileSkip)+8*i:]), 0, max)
-			if err != nil {
-				return fmt.Errorf("cannot read pages list[%v]: %v", i, err)
-			}
-			if g != e {
-				return fmt.Errorf("invalid pages list[%v], got %v, expected %v", i, g, e)
-			}
-
-			if g == 0 {
-				continue
-			}
-
-			if (g-szFile)&((1<<pageBits)-1) != 0 {
-				return fmt.Errorf("invalid pages lists[%v] head: %#x", i, g)
-			}
-
-			if _, ok := pm[g]; ok && g != 0 {
-				return fmt.Errorf("pages list[%v] reused: %#x", i, g)
-			}
-
-			pm[g] = struct{}{}
+		if g == 0 {
+			continue
 		}
-		for i, e := range a.slots {
-			g, err := a.check(read(buf[int(oFileSlots-oFileSkip)+8*i:]), 0, max)
-			if err != nil {
-				return fmt.Errorf("cannot read slots list[%v]: %v", i, err)
-			}
 
-			if g != e {
-				return fmt.Errorf("invalid slots list[%v], got %v, expected %v", i, g, e)
-			}
-
-			if g == 0 {
-				continue
-			}
-
-			if _, ok := sm[g]; ok && g != 0 {
-				return fmt.Errorf("slots list[%v] reused: %#x", i, g)
-			}
-
-			sm[g] = struct{}{}
+		if (g-szFile)&((1<<pageBits)-1) != 0 {
+			return fmt.Errorf("invalid pages lists[%v] head: %#x", i, g)
 		}
+
+		if _, ok := pm[g]; ok && g != 0 {
+			return fmt.Errorf("pages list[%v] reused: %#x", i, g)
+		}
+
+		pm[g] = struct{}{}
+	}
+	for i, e := range a.slots {
+		max := a.fsize - 16<<uint(i)
+		if a.fsize == szFile {
+			max = 0
+		}
+		g, err := a.check(read(buf[int(oFileSlots-oFileSkip)+8*i:]), 0, max)
+		if err != nil {
+			return fmt.Errorf("cannot read slots list[%v]: %v", i, err)
+		}
+
+		if g != e {
+			return fmt.Errorf("invalid slots list[%v], got %v, expected %v", i, g, e)
+		}
+
+		if g == 0 {
+			continue
+		}
+
+		if _, ok := sm[g]; ok && g != 0 {
+			return fmt.Errorf("slots list[%v] reused: %#x", i, g)
+		}
+
+		sm[g] = struct{}{}
 	}
 
 	// Check pages.
