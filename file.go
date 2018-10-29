@@ -499,6 +499,7 @@ func (a *Allocator) SetFile(f File) error {
 	}
 	a.f = f
 	a.fsize = fsize
+	a.dirty = false
 	return nil
 }
 
