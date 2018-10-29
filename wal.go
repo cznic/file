@@ -272,6 +272,10 @@ func (w *WAL) Sync() error { return w.W.Sync() }
 //
 // Truncate implements File.
 func (w *WAL) Truncate(size int64) error {
+	if size < 0 {
+		return fmt.Errorf("%T.Truncate(): invalid size %#x", w, size)
+	}
+
 	first := size &^ w.pageMask
 	zf := int64(-1)
 	if po := size & w.pageMask; po != 0 {
@@ -311,6 +315,10 @@ func (w *WAL) Truncate(size int64) error {
 //
 // ReadAt implements File.
 func (w *WAL) ReadAt(b []byte, off int64) (n int, err error) {
+	if off < 0 {
+		return 0, fmt.Errorf("%T.ReadAt(): invalid offset %#x", w, off)
+	}
+
 	avail := w.size - off
 	for len(b) != 0 && avail != 0 {
 		p := off &^ w.pageMask
@@ -396,6 +404,10 @@ func (w *WAL) ReadAt(b []byte, off int64) (n int, err error) {
 //
 // WriteAt implements File.
 func (w *WAL) WriteAt(b []byte, off int64) (n int, err error) {
+	if off < 0 {
+		return 0, fmt.Errorf("%T.ReadAt(): invalid offset %#x", w, off)
+	}
+
 	if len(b) == 0 {
 		return 0, nil
 	}

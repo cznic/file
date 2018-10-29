@@ -23,9 +23,9 @@ import (
 )
 
 const (
-	// File offsets of allocations = 0 (mod AllocAllign).
-	AllocAllign = 16
-	// First allocation of an empty File will have this offset.
+	// AllocAlign defines File offsets of allocations are 0 (mod AllocAlign).
+	AllocAlign = 16
+	// LowestAllocationOffset is the offset of the first allocation of an empty File.
 	LowestAllocationOffset = szFile + szPage
 
 	bufSize       = 1 << 20 // Calloc, Realloc.
@@ -62,10 +62,12 @@ var (
 )
 
 func init() {
-	if szFile%AllocAllign != 0 || szFile != 256 || szNode%AllocAllign != 0 || szPage%AllocAllign != 0 {
+	if szFile%AllocAlign != 0 || szFile != 256 || szNode%AllocAlign != 0 || szPage%AllocAlign != 0 {
 		panic("internal error: invalid configuration")
 	}
 }
+
+func aligned(off int64) bool { return off&(AllocAlign-1) == 0 }
 
 // 0:     1 -      1
 // 1:    10 -     10
@@ -133,7 +135,7 @@ func slotRank(n int) int {
 		panic(fmt.Errorf("internal error: slotRank(%v)", n))
 	}
 
-	return log(roundup(n, AllocAllign)) - 4
+	return log(roundup(n, AllocAlign)) - 4
 }
 
 // Put an int64 in b. len(b) must be >= 8.
@@ -553,6 +555,10 @@ func (a *Allocator) Alloc(size int64) (int64, error) {
 
 // Calloc is like Alloc but the allocated file block is zeroed up to size.
 func (a *Allocator) Calloc(size int64) (int64, error) {
+	if size <= 0 {
+		return -1, fmt.Errorf("invalid argument: %T.Calloc(%v)", a, size)
+	}
+
 	off, err := a.Alloc(size)
 	if err != nil {
 		return -1, err
@@ -590,7 +596,7 @@ func (a *Allocator) Close() error {
 
 // Free recycles the allocated file block at off.
 func (a *Allocator) Free(off int64) error {
-	if off < szFile+szPage {
+	if off < szFile+szPage || !aligned(off) {
 		return fmt.Errorf("invalid argument: %T.Free(%v)", a, off)
 	}
 
@@ -635,7 +641,7 @@ func (a *Allocator) Free(off int64) error {
 // sizes. Realloc(off, 0) is equal to Free(off). If the file block was moved, a
 // Free(off) is done.
 func (a *Allocator) Realloc(off, size int64) (int64, error) {
-	if off < szFile+szPage {
+	if off < szFile+szPage || !aligned(off) {
 		return -1, fmt.Errorf("invalid argument: %T.Realloc(%v)", a, off)
 	}
 
@@ -696,6 +702,10 @@ func (a *Allocator) Realloc(off, size int64) (int64, error) {
 // have been returned from Alloc or Realloc.  The allocated file block size can
 // be larger than the size originally requested from Alloc or Realloc.
 func (a *Allocator) UsableSize(off int64) (int64, error) {
+	if off < szFile+szPage || !aligned(off) {
+		return -1, fmt.Errorf("invalid argument: %T.UsableSize(%v)", a, off)
+	}
+
 	n, _, err := a.usableSize(off)
 	return n, err
 }
@@ -1287,6 +1297,10 @@ func (a *Allocator) Verify(opt *VerifyOptions) error {
 	var npages, usedPages, allocs int64
 	off := szFile
 	for off < a.fsize {
+		if !aligned(off) {
+			return fmt.Errorf("unaligned offset")
+		}
+
 		off2 := off - szFile
 		if off2&((1<<pageBits)-1) != 0 {
 			return fmt.Errorf("invalid page boundary %#x", off)
@@ -1336,6 +1350,10 @@ func (a *Allocator) Verify(opt *VerifyOptions) error {
 	for i, off := range a.pages {
 		// Walk the single list.
 		for off != 0 {
+			if !aligned(off) {
+				return fmt.Errorf("unaligned offset")
+			}
+
 			v, err := bits.set(off)
 			if err != nil {
 				return fmt.Errorf("%v: bitmap.set(%#x): %v", i, off, err)
@@ -1358,6 +1376,10 @@ func (a *Allocator) Verify(opt *VerifyOptions) error {
 	for i, off := range a.slots {
 		// Walk the single list.
 		for off != 0 {
+			if !aligned(off) {
+				return fmt.Errorf("unaligned offset")
+			}
+
 			v, err := bits.set(off)
 			if err != nil {
 				return fmt.Errorf("%v: bitmap.set(%#x): %v", i, off, err)
