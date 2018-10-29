@@ -15,6 +15,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"sync"
 	"unsafe"
 
 	"github.com/cznic/internal/buffer"
@@ -59,6 +60,10 @@ var (
 	_ File        = (*os.File)(nil)
 	_ io.ReaderAt = File(nil)
 	_ io.WriterAt = File(nil)
+
+	zMemPage memPage
+
+	memPagePool = sync.Pool{New: func() interface{} { return &memPage{} }}
 )
 
 func init() {
@@ -155,9 +160,10 @@ type node struct {
 // memNode is the memory representation of a loaded node.
 type memNode struct {
 	*Allocator
-	dirty bool
 	node
 	off int64 // Offset of the node in File.
+
+	dirty bool
 }
 
 // flush stores/persists m if dirty.
@@ -229,9 +235,10 @@ type page struct {
 // memPage is the memory representation of a loaded page.
 type memPage struct {
 	*Allocator
-	dirty bool
-	off   int64
+	off int64
 	page
+
+	dirty bool
 }
 
 // flush stores/persists m if dirty.
@@ -342,7 +349,9 @@ func (m *memPage) split(need int64) (int64, error) {
 		return -1, err
 	}
 
-	return m.off + szPage, m.Allocator.flush(m.autoflush)
+	r := m.off + szPage
+	memPagePool.Put(n)
+	return r, m.Allocator.flush(m.autoflush)
 }
 
 func (m *memPage) unlink() error {
@@ -356,6 +365,8 @@ func (m *memPage) unlink() error {
 		if err := prev.flush(); err != nil {
 			return err
 		}
+
+		memPagePool.Put(prev)
 	}
 
 	if m.next != 0 {
@@ -368,6 +379,8 @@ func (m *memPage) unlink() error {
 		if err := next.flush(); err != nil {
 			return err
 		}
+
+		memPagePool.Put(next)
 	}
 
 	if m.pages[m.rank] == m.off {
@@ -551,7 +564,9 @@ func (a *Allocator) Alloc(size int64) (int64, error) {
 		return -1, err
 	}
 
-	return p.slot(0), a.flush(a.autoflush)
+	r := p.slot(0)
+	memPagePool.Put(p)
+	return r, a.flush(a.autoflush)
 }
 
 // Calloc is like Alloc but the allocated file block is zeroed up to size.
@@ -612,6 +627,7 @@ func (a *Allocator) Free(off int64) error {
 			return err
 		}
 
+		memPagePool.Put(p)
 		return a.flush(a.autoflush)
 	}
 
@@ -625,6 +641,7 @@ func (a *Allocator) Free(off int64) error {
 			return err
 		}
 
+		memPagePool.Put(p)
 		return a.flush(a.autoflush)
 	}
 
@@ -632,6 +649,7 @@ func (a *Allocator) Free(off int64) error {
 		return err
 	}
 
+	memPagePool.Put(p)
 	return a.flush(a.autoflush)
 }
 
@@ -658,12 +676,15 @@ func (a *Allocator) Realloc(off, size int64) (int64, error) {
 	if oldSize >= size {
 		newRank := rank(size)
 		if int(p.rank) == newRank {
+			memPagePool.Put(p)
 			return off, nil
 		}
 
 		if newRank > maxSharedRank {
 			if need := roundup64(szPage+size+szInt64, pageSize); p.size > need {
-				return p.split(need)
+				off, err := p.split(need)
+				memPagePool.Put(p)
+				return off, err
 			}
 		}
 	}
@@ -707,7 +728,8 @@ func (a *Allocator) UsableSize(off int64) (int64, error) {
 		return -1, fmt.Errorf("invalid argument: %T.UsableSize(%v)", a, off)
 	}
 
-	n, _, err := a.usableSize(off)
+	n, p, err := a.usableSize(off)
+	memPagePool.Put(p)
 	return n, err
 }
 
@@ -731,10 +753,13 @@ func (a *Allocator) allocBig(size int64) (int64, error) {
 			}
 
 			if p.size >= need {
-				return a.allocMaxRank(p, need)
+				r, err := a.allocMaxRank(p, need)
+				memPagePool.Put(p)
+				return r, err
 			}
 
 			off = p.next
+			memPagePool.Put(p)
 		}
 	}
 
@@ -747,7 +772,9 @@ func (a *Allocator) allocBig(size int64) (int64, error) {
 		return -1, err
 	}
 
-	return p.off + szPage, a.flush(a.autoflush)
+	r := p.off + szPage
+	memPagePool.Put(p)
+	return r, a.flush(a.autoflush)
 }
 
 func (a *Allocator) allocBig2(off int64) (int64, error) {
@@ -768,7 +795,9 @@ func (a *Allocator) allocBig2(off int64) (int64, error) {
 		return -1, err
 	}
 
-	return p.off + szPage, a.flush(a.autoflush)
+	r := p.off + szPage
+	memPagePool.Put(p)
+	return r, a.flush(a.autoflush)
 }
 
 func (a *Allocator) allocMaxRank(p *memPage, need int64) (int64, error) {
@@ -803,6 +832,8 @@ func (a *Allocator) allocMaxRank(p *memPage, need int64) (int64, error) {
 		if err := q.setTail(q.size); err != nil {
 			return -1, err
 		}
+
+		memPagePool.Put(q)
 	}
 
 	return p.off + szPage, a.flush(a.autoflush)
@@ -828,6 +859,7 @@ func (a *Allocator) allocSlot(off int64, rank int) (int64, error) {
 		return -1, err
 	}
 
+	memPagePool.Put(p)
 	return off, a.flush(a.autoflush)
 }
 
@@ -861,6 +893,7 @@ func (a *Allocator) flush(v bool) error {
 }
 
 func (a *Allocator) freeLastPage(p *memPage) error {
+	p0 := p
 	for {
 		if p.rank <= maxSharedRank {
 			if err := p.freeSlots(); err != nil {
@@ -889,12 +922,20 @@ func (a *Allocator) freeLastPage(p *memPage) error {
 			}
 
 			if prevSize != 0 {
-				if p, err = a.openPage(p.off - prevSize); err != nil {
+				q, err := a.openPage(p.off - prevSize)
+				if err != nil {
 					return err
 				}
 
+				if p != p0 {
+					memPagePool.Put(p)
+				}
+				p = q
 				continue
 			}
+		}
+		if p != p0 {
+			memPagePool.Put(p)
 		}
 		return nil
 	}
@@ -948,6 +989,8 @@ func (a *Allocator) insertPage(p *memPage) error {
 		if err := next.flush(); err != nil {
 			return err
 		}
+
+		memPagePool.Put(next)
 	}
 	a.setPage(int(p.rank), p.off)
 	return nil
@@ -971,7 +1014,13 @@ func (a *Allocator) insertSlot(rank int, off int64) error {
 	return m.flush()
 }
 
-func (a *Allocator) newMemPage(off int64) *memPage { return &memPage{Allocator: a, off: off} }
+func (a *Allocator) newMemPage(off int64) *memPage {
+	m := memPagePool.Get().(*memPage)
+	*m = zMemPage
+	m.Allocator = a
+	m.off = off
+	return m
+}
 
 func (a *Allocator) newPage(size int64) (*memPage, error) {
 	off := roundup64(a.fsize-szFile, pageSize) + szFile
@@ -997,7 +1046,7 @@ func (a *Allocator) newSharedPage(rank int) (*memPage, error) {
 }
 
 // openNode returns a memNode from a node at File offset off.
-func (a *Allocator) openNode(off int64) (*memNode, error) { //TODO return value, not pointer
+func (a *Allocator) openNode(off int64) (*memNode, error) {
 	p := buffer.Get(int(szNode)) //TODO Static alloc
 	b := *p
 	if n, err := a.f.ReadAt(b, off); n != len(b) {
@@ -1019,7 +1068,7 @@ func (a *Allocator) openNode(off int64) (*memNode, error) { //TODO return value,
 	return m, nil
 }
 
-func (a *Allocator) openPage(off int64) (*memPage, error) { //TODO return value, not pointer
+func (a *Allocator) openPage(off int64) (*memPage, error) {
 	p := buffer.Get(int(szPage)) //TODO Static alloc
 	b := *p
 	if n, err := a.f.ReadAt(b, off); n != len(b) {
@@ -1029,19 +1078,16 @@ func (a *Allocator) openPage(off int64) (*memPage, error) { //TODO return value,
 		return nil, err
 	}
 
-	m := &memPage{
-		Allocator: a,
-		off:       off,
-		page: page{
-			brk: read(b[oPageBrk:]),
-			node: node{
-				next: read(b[oPageNext:]),
-				prev: read(b[oPagePrev:]),
-			},
-			rank:      read(b[oPageRank:]),
-			size:      read(b[oPageSize:]),
-			usedSlots: read(b[oPageUsed:]),
+	m := a.newMemPage(off)
+	m.page = page{
+		brk: read(b[oPageBrk:]),
+		node: node{
+			next: read(b[oPageNext:]),
+			prev: read(b[oPagePrev:]),
 		},
+		rank:      read(b[oPageRank:]),
+		size:      read(b[oPageSize:]),
+		usedSlots: read(b[oPageUsed:]),
 	}
 	buffer.Put(p)
 	return m, nil
@@ -1083,7 +1129,9 @@ func (a *Allocator) sbrk(off int64, rank int) (int64, error) {
 		return -1, err
 	}
 
-	return p.slot(int(p.brk) - 1), a.flush(a.autoflush)
+	r := p.slot(int(p.brk) - 1)
+	memPagePool.Put(p)
+	return r, a.flush(a.autoflush)
 }
 
 func (a *Allocator) sbrk2(off int64, rank int) (int64, error) {
@@ -1111,7 +1159,9 @@ func (a *Allocator) sbrk2(off int64, rank int) (int64, error) {
 		return -1, err
 	}
 
-	return p.off + szPage, a.flush(a.autoflush)
+	r := p.off + szPage
+	memPagePool.Put(p)
+	return r, a.flush(a.autoflush)
 }
 
 func (a *Allocator) setPage(rank int, n int64) { a.pages[rank] = n; a.dirty = true }
@@ -1331,6 +1381,7 @@ func (a *Allocator) Verify(opt *VerifyOptions) error {
 		delete(pm, off)
 		npages++
 		off += p.size
+		memPagePool.Put(p)
 	}
 	if len(pm) != 0 {
 		return fmt.Errorf("invalid pages lists heads: %#x", pm)
@@ -1370,6 +1421,7 @@ func (a *Allocator) Verify(opt *VerifyOptions) error {
 			}
 
 			off = p.next
+			memPagePool.Put(p)
 		}
 	}
 
