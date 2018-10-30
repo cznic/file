@@ -259,7 +259,7 @@ func (w *WAL) Close() error { return nil }
 // Stat implements File. The size reported by the result is that of w.F _after_
 // w.Commit will be eventually successfully performed.
 //
-// Sync implements File.
+// Stat implements File.
 func (w *WAL) Stat() (os.FileInfo, error) { return (*fileInfo)(w), nil }
 
 // Sync executes w.W.Sync.
@@ -515,10 +515,6 @@ func (w *WAL) Commit() error {
 		return fmt.Errorf("%T.Commit: write WAL metadata: %v", w, err)
 	}
 
-	if err := w.W.Sync(); err != nil {
-		return fmt.Errorf("%T.Commit: sync WAL: %v", w, err)
-	}
-
 	if crash {
 		return nil
 	}
@@ -565,16 +561,8 @@ func (w *WAL) commit(h int64) error {
 		return fmt.Errorf("%T.commit: truncate: %v", w, err)
 	}
 
-	if err := w.F.Sync(); err != nil {
-		return fmt.Errorf("%T.commit: sync: %v", w, err)
-	}
-
 	if err := w.W.Truncate(w.skip); err != nil {
 		return fmt.Errorf("%T.commit: truncate WAL: %v", w, err)
-	}
-
-	if err := w.W.Sync(); err != nil {
-		return fmt.Errorf("%T.commit: sync WAL: %v", w, err)
 	}
 
 	switch {
@@ -593,10 +581,6 @@ func (w *WAL) commit(h int64) error {
 // Rollback empties the WAL journal without transferring it to F.
 func (w *WAL) Rollback() error {
 	if err := w.W.Truncate(w.skip); err != nil {
-		return err
-	}
-
-	if err := w.W.Sync(); err != nil {
 		return err
 	}
 
