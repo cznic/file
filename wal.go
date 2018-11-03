@@ -141,6 +141,7 @@ func (f *fileInfo) Sys() interface{}   { return f.sys }
 // valid and non empty. If NewWAL is passed a valid, non empty W in its w
 // argument, NewWAL restarts journal replay.
 type WAL struct {
+	DoSync       bool // Secure commits with fsync.
 	F            File // The f argument of NewWAL for convenience. R/O
 	W            File // The w argument of NewWAL for convenience. R/O
 	b8           [szInt64]byte
@@ -515,6 +516,12 @@ func (w *WAL) Commit() error {
 		return fmt.Errorf("%T.Commit: write WAL metadata: %v", w, err)
 	}
 
+	if w.DoSync {
+		if err := w.Sync(); err != nil {
+			return err
+		}
+	}
+
 	if crash {
 		return nil
 	}
@@ -561,12 +568,18 @@ func (w *WAL) commit(h int64) error {
 		return fmt.Errorf("%T.commit: truncate: %v", w, err)
 	}
 
+	if w.DoSync {
+		if err := w.F.Sync(); err != nil {
+			return err
+		}
+	}
+
 	if err := w.W.Truncate(w.skip); err != nil {
 		return fmt.Errorf("%T.commit: truncate WAL: %v", w, err)
 	}
 
 	switch {
-	case len(w.m) <= 10:
+	case len(w.m) <= 100:
 		for k := range w.m {
 			delete(w.m, k)
 		}
