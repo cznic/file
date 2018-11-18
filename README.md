@@ -1,9 +1,5 @@
-# file
+`github.com/cznic/file` has moved to [`modernc.org/file`](https://godoc.org/modernc.org/file) ([vcs](https://gitlab.com/cznic/file)).
 
-Package file handles write-ahead logs and space management of os.File-like entities.
+Please update your import paths to `modernc.org/file`.
 
-Installation
-
-    $ go get github.com/cznic/file
-
-Documentation: [godoc.org/github.com/cznic/file](http://godoc.org/github.com/cznic/file)
+This repo is now archived.
